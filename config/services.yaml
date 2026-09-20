@@ -1,0 +1,57 @@
+# This file is the entry point for all custom service configuration.
+parameters:
+    env(MCP_SERVER_NAME): 'context-shuttle'
+    env(MCP_SERVER_VERSION): '1.0.0'
+
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+        bind:
+            $serverName: '%env(MCP_SERVER_NAME)%'
+            $serverVersion: '%env(MCP_SERVER_VERSION)%'
+
+    App\:
+        resource: '../src/'
+        exclude:
+            - '../src/Kernel.php'
+            - '../src/Mcp/LoggingDispatcher.php'
+            - '../src/Mcp/McpStack.php'
+            - '../src/Mcp/YamlToolRegistrar.php'
+            - '../src/Mcp/CaptureTransport.php'
+            - '../src/ToolRegistry/ToolDefinition.php'
+            - '../src/ToolRegistry/ToolDefinitionException.php'
+            - '../src/ToolRegistry/ToolLoader.php'
+            - '../src/ToolRegistry/ToolRegistryPass.php'
+
+    # ── Controllers ────────────────────────────────────────────────────
+    App\Mcp\McpController:
+        tags: ['controller.service_arguments']
+
+    App\Rest\ToolRestController:
+        tags: ['controller.service_arguments']
+
+    App\Rest\OpenApiController:
+        tags: ['controller.service_arguments']
+
+    App\Health\HealthController:
+        tags: ['controller.service_arguments']
+
+    # ── MCP wiring ─────────────────────────────────────────────────────
+    # The factory assembles the php-mcp Protocol/Dispatcher per request;
+    # LoggingDispatcher/YamlToolRegistrar/CaptureTransport are constructed
+    # by it directly (excluded from autoregistration above).
+    App\Mcp\McpServerFactory:
+        arguments:
+            $container: '@service_container'
+            $logger: '@logger'
+            $invocationLogger: '@monolog.logger.mcp_invocation'
+
+    # Tool handlers are resolved by the MCP library through the PSR-11
+    # container at call time, so they must stay public (removable
+    # inlining breaks ->get() on the compiled container).
+    App\Tool\Weather\WeatherTool:
+        public: true
+
+    App\Tool\Echo\EchoTool:
+        public: true

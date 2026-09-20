@@ -1,0 +1,17 @@
+# Echo tool — network-free example tool used by the test suite.
+name: echo
+description: >
+  Echo the provided message back, optionally transforming the case.
+  A dependency-free example tool: useful as a template and for testing
+  the tool pipeline without network access.
+handler: App\Tool\Echo\EchoTool::echo
+parameters:
+  message:
+    type: string
+    description: The text to echo back.
+    required: true
+  style:
+    type: string
+    description: 'Optional case transform: "upper" or "lower". Default: none.'
+    required: false
+    enum: [upper, lower]

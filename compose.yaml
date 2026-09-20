@@ -1,0 +1,22 @@
+# context-shuttle — local development compose.
+# Production runs the built image with env-injected secrets, not this file.
+
+services:
+  context-shuttle:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: context-shuttle:local
+    ports:
+      - "8100:80"
+    environment:
+      APP_ENV: dev
+      APP_SECRET: ${APP_SECRET:-dev-secret-not-for-production}
+      MCP_SERVER_NAME: context-shuttle
+      MCP_SERVER_VERSION: 1.0.0
+      LOG_LEVEL: debug
+    volumes:
+      - shuttle-data:/data
+
+volumes:
+  shuttle-data:

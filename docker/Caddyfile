@@ -1,0 +1,17 @@
+# FrankenPHP app config for context-shuttle.
+# Serves public/ with PHP; health endpoints bypass normal routing limits.
+
+{
+	# Listen on the standard FrankenPHP port inside the container
+	admin off
+}
+
+{$SERVER_NAME:localhost} {
+	root * public
+	encode zstd gzip
+
+	# Liveness and readiness are cheap; don't time them out
+	health_uri /health
+
+	php_server
+}

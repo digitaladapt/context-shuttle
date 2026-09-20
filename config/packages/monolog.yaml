@@ -1,0 +1,24 @@
+monolog:
+    channels:
+        - mcp_invocation
+        - tool_registry
+
+    handlers:
+        # Main application log: JSON lines to stdout (12-factor).
+        main:
+            type: stream
+            path: php://stdout
+            level: info
+            channels: ['!mcp_invocation']
+            formatter: monolog.formatter.json
+
+        # Dedicated invocation log: every tool call, MCP or REST, lands here
+        # as one structured JSON line (request id, tool, args, duration,
+        # result, outcome). This satisfies the logging requirement and is
+        # cheap to ship to a log aggregator.
+        mcp_invocation:
+            type: stream
+            path: php://stdout
+            level: info
+            channels: ['mcp_invocation']
+            formatter: monolog.formatter.json

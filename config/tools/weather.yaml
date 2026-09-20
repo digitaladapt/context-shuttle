@@ -1,0 +1,28 @@
+# Weather tool — current conditions and forecast via Open-Meteo.
+# Free API, no key required. Both REST (POST /tools/get_weather) and
+# MCP (tools/call get_weather) invoke the same handler.
+name: get_weather
+description: >
+  Get current weather conditions and a multi-day forecast for any location.
+  Accepts either "lat,lon" coordinates (e.g. "45.5,-122.6") or a free-text
+  place name (e.g. "Reykjavik" or "Portland, Oregon") which is resolved via
+  geocoding. Data from Open-Meteo (no API key required).
+handler: App\Tool\Weather\WeatherTool::getWeather
+parameters:
+  location:
+    type: string
+    description: 'Location as "lat,lon" coordinates or a place name (e.g. "Berlin").'
+    required: true
+  forecast_days:
+    type: integer
+    description: 'Number of forecast days to include (1-7). Defaults to 3.'
+    required: false
+    default: 3
+    minimum: 1
+    maximum: 7
+  units:
+    type: string
+    description: 'Measurement units: "metric" (°C, km/h) or "imperial" (°F, mph). Defaults to metric.'
+    required: false
+    default: metric
+    enum: [metric, imperial]

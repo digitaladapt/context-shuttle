@@ -1,0 +1,31 @@
+mcp:
+    path: /mcp
+    controller: App\Mcp\McpController::__invoke
+    methods: [POST, OPTIONS, GET, DELETE]
+
+tools_list:
+    path: /tools
+    controller: App\Rest\ToolRestController::list
+    methods: [GET]
+
+tool_invoke:
+    path: /tools/{name}
+    controller: App\Rest\ToolRestController::invoke
+    methods: [POST]
+    requirements:
+        name: '[a-z][a-z0-9_]*'
+
+openapi:
+    path: /openapi.json
+    controller: App\Rest\OpenApiController
+    methods: [GET]
+
+health:
+    path: /health
+    controller: App\Health\HealthController::health
+    methods: [GET]
+
+ready:
+    path: /ready
+    controller: App\Health\HealthController::ready
+    methods: [GET]

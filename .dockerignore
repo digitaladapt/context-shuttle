@@ -1,0 +1,44 @@
+# .dockerignore — the canonical leaf (Guiding Light §6.2).
+# /docker and /docs are documentation/build inputs, not image content;
+# config/ is NEVER dockerignored (§6.3).
+
+# VCS
+.git
+.gitignore
+.gitattributes
+
+# CI / tooling
+.ci
+.gitea
+.github
+.phpunit.cache
+.php-cs-fixer.dist.php
+phpstan.neon.dist
+rector.php
+.editorconfig
+
+# Local env — never bake secrets into images (§8.12)
+.env
+.env.local
+.env.*.local
+.env.test
+
+# Dev artifacts
+tests
+var
+vendor
+node_modules
+importmap.php
+assets
+translations
+templates
+migrations
+docs
+compose.yaml
+Dockerfile
+.dockerignore
+README.md
+CHANGELOG.md
+CONTRIBUTING.md
+SECURITY.md
+.php-version
