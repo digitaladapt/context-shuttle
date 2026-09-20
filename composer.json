@@ -1,4 +1,5 @@
 {
+    "name": "devgnome/context-shuttle",
     "type": "project",
     "license": "MIT",
     "minimum-stability": "stable",
@@ -8,7 +9,7 @@
         "ext-ctype": "*",
         "ext-iconv": "*",
         "guzzlehttp/psr7": "^2.13",
-        "php-mcp/server": "dev-feat/symfony-8-support#bce7f1670a88f26763cbd6eae7ba359decd3c07d as 3.3.99",
+        "php-mcp/server": "~3.3.99",
         "symfony/cache": "8.1.*",
         "symfony/clock": "8.1.*",
         "symfony/console": "8.1.*",
