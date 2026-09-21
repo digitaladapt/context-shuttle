@@ -74,7 +74,6 @@ USER app
 VOLUME /data
 
 ENV APP_ENV=prod
-ENV APP_RUNTIME=FrankenPhpSymfonyRuntime
 ENV SERVER_NAME=:80
 
 EXPOSE 80
