@@ -17,7 +17,6 @@ use Throwable;
 
 use function array_filter;
 use function array_map;
-use function array_merge;
 use function array_values;
 use function json_encode;
 use function preg_match;
@@ -40,7 +39,8 @@ final class McpController
     public function __invoke(Request $request): Response
     {
         if ('OPTIONS' === $request->getMethod()) {
-            return new Response(status: 204, headers: $this->corsHeaders());
+            // Handled before routing by CorsSubscriber; kept as a fallback.
+            return new Response(status: 204);
         }
 
         if ('POST' !== $request->getMethod()) {
@@ -51,7 +51,7 @@ final class McpController
                     'message' => 'Method not allowed. Use POST with JSON-RPC payloads; OPTIONS for CORS.',
                 ],
                 'id' => null,
-            ], Response::HTTP_METHOD_NOT_ALLOWED, $this->corsHeaders());
+            ], Response::HTTP_METHOD_NOT_ALLOWED);
         }
 
         if (!$this->acceptsJson($request)) {
@@ -62,7 +62,7 @@ final class McpController
                     'message' => 'Not Acceptable: client must accept application/json or text/event-stream.',
                 ],
                 'id' => null,
-            ], Response::HTTP_NOT_ACCEPTABLE, $this->corsHeaders());
+            ], Response::HTTP_NOT_ACCEPTABLE);
         }
 
         $content = $request->getContent();
@@ -111,13 +111,13 @@ final class McpController
 
         if (null === $response) {
             // Notification-only payloads correctly have no response.
-            return new Response(status: 202, headers: $this->corsHeaders());
+            return new Response(status: 202);
         }
 
         return new Response(
             json_encode($response, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n",
             Response::HTTP_OK,
-            array_merge($this->corsHeaders(), ['Content-Type' => 'application/json']),
+            ['Content-Type' => 'application/json'],
         );
     }
 
@@ -129,19 +129,6 @@ final class McpController
             || str_contains($accept, 'application/json')
             || str_contains($accept, 'text/event-stream')
             || str_contains($accept, '*/*');
-    }
-
-    /**
-     * @return array<string, string>
-     */
-    private function corsHeaders(): array
-    {
-        return [
-            'Access-Control-Allow-Origin' => '*',
-            'Access-Control-Allow-Methods' => 'POST, OPTIONS',
-            'Access-Control-Allow-Headers' => 'Content-Type, Mcp-Session-Id, Last-Event-ID, Authorization',
-            'Access-Control-Expose-Headers' => 'Mcp-Session-Id',
-        ];
     }
 
     private function toPsr7(Request $request): ServerRequestInterface
@@ -174,6 +161,6 @@ final class McpController
                 'message' => $message,
             ],
             'id' => $id,
-        ], $status, $this->corsHeaders());
+        ], $status);
     }
 }
