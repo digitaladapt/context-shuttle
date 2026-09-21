@@ -1,0 +1,34 @@
+name: Push Docker
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract version
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build image
+        env:
+          DOCKERHUB_TARGET: ${{ vars.DOCKERHUB_TARGET }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          TAG: latest
+        run: docker buildx bake --file docker-bake.hcl --push
