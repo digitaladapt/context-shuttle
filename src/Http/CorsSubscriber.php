@@ -1,0 +1,146 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http;
+
+use Symfony\Component\EventDispatcher\EventSubscriberInterface;
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Event\RequestEvent;
+use Symfony\Component\HttpKernel\Event\ResponseEvent;
+use Symfony\Component\HttpKernel\KernelEvents;
+
+use function array_filter;
+use function array_map;
+use function explode;
+use function implode;
+use function in_array;
+use function preg_match;
+use function str_starts_with;
+
+/**
+ * CORS handling for browser clients (e.g. llama.cpp's web UI).
+ *
+ * Authorization is an allowed request header, which forces the credentialed
+ * CORS mode: browsers ignore "Access-Control-Allow-Origin: *" when
+ * credentials are involved, so the request's Origin must be echoed back
+ * verbatim, together with "Access-Control-Allow-Credentials: true". The
+ * "Vary: Origin" header keeps shared caches from serving one origin's
+ * allowed response to a different origin.
+ *
+ * Preflights (OPTIONS + Origin) are answered centrally here, before the
+ * router runs, and every response is decorated on the way out — so all
+ * endpoints (/mcp, /tools, /openapi.json, /health, /ready) get identical
+ * CORS behavior.
+ *
+ * @internal
+ */
+final class CorsSubscriber implements EventSubscriberInterface
+{
+    private const ALLOW_METHODS = 'GET, POST, OPTIONS, DELETE';
+    private const ALLOW_HEADERS = 'Content-Type, Mcp-Session-Id, Last-Event-ID, Authorization';
+    private const EXPOSE_HEADERS = 'Mcp-Session-Id';
+    private const MAX_AGE = '600';
+
+    public static function getSubscribedEvents(): array
+    {
+        return [
+            // Priority above the router (priority 32) so preflights never
+            // reach routing or controllers.
+            KernelEvents::REQUEST => ['onKernelRequest', 256],
+            KernelEvents::RESPONSE => ['onKernelResponse', 0],
+        ];
+    }
+
+    /**
+     * Answer CORS preflights before routing.
+     */
+    public function onKernelRequest(RequestEvent $event): void
+    {
+        if (!$event->isMainRequest()) {
+            return;
+        }
+
+        $request = $event->getRequest();
+
+        if (!$request->isMethod('OPTIONS') || null === $this->origin($request)) {
+            return;
+        }
+
+        $response = new Response(status: 204);
+        $response->headers->set('Access-Control-Allow-Origin', (string) $this->origin($request));
+        $response->headers->set('Access-Control-Allow-Credentials', 'true');
+        $response->headers->set('Access-Control-Allow-Methods', self::ALLOW_METHODS);
+        $response->headers->set('Access-Control-Allow-Headers', self::ALLOW_HEADERS);
+        $response->headers->set('Access-Control-Max-Age', self::MAX_AGE);
+        $this->addVaryOrigin($response);
+
+        $event->setResponse($response);
+    }
+
+    /**
+     * Decorate every response with the credentialed-CORS headers.
+     */
+    public function onKernelResponse(ResponseEvent $event): void
+    {
+        if (!$event->isMainRequest()) {
+            return;
+        }
+
+        $request = $event->getRequest();
+        $origin = $this->origin($request);
+
+        if (null === $origin) {
+            // Same-origin (or non-browser) request: no CORS headers needed,
+            // but keep Vary: Origin so caches treat responses per-origin.
+            $this->addVaryOrigin($event->getResponse());
+
+            return;
+        }
+
+        $response = $event->getResponse();
+        $response->headers->set('Access-Control-Allow-Origin', $origin);
+        $response->headers->set('Access-Control-Allow-Credentials', 'true');
+        $response->headers->set('Access-Control-Expose-Headers', self::EXPOSE_HEADERS);
+        $this->addVaryOrigin($response);
+    }
+
+    /**
+     * The Origin of the request, or null when absent. "null" (e.g. from
+     * sandboxed frames or some CLI clients) is treated as present: echoing
+     * it is still more correct than a wildcard browsers will reject.
+     */
+    private function origin(Request $request): ?string
+    {
+        $origin = $request->headers->get('Origin');
+
+        if (null === $origin || '' === $origin) {
+            return null;
+        }
+
+        // No header-injection: drop origins containing control characters.
+        if (1 === preg_match('/[\r\n\0]/', $origin)) {
+            return null;
+        }
+
+        // Scheme is required by the CORS spec; strip opaque junk.
+        if (!str_starts_with($origin, 'http://') && !str_starts_with($origin, 'https://') && 'null' !== $origin) {
+            return null;
+        }
+
+        return $origin;
+    }
+
+    private function addVaryOrigin(Response $response): void
+    {
+        $existing = (string) $response->headers->get('Vary', '');
+        $parts = array_filter(array_map('trim', explode(',', $existing)));
+
+        if (!in_array('Origin', $parts, true)) {
+            $parts[] = 'Origin';
+        }
+
+        $response->headers->set('Vary', implode(', ', $parts));
+    }
+}
