@@ -85,7 +85,7 @@
     "repositories": [{
         "name": "php-mcp-server",
         "type": "vcs",
-        "url": "git@code.devgnome.com:public/php-mcp-server.git"
+        "url": "https://code.devgnome.com/public/php-mcp-server.git"
     }],
     "require-dev": {
         "friendsofphp/php-cs-fixer": "^3.95",

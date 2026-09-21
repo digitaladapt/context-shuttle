@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "370e0b1638648854de63154c81018d1d",
+    "content-hash": "a10b9a13da2863e3d865b9781f68cd1b",
     "packages": [
         {
             "name": "doctrine/deprecations",
@@ -616,7 +616,7 @@
             "version": "3.3.99",
             "source": {
                 "type": "git",
-                "url": "git@code.devgnome.com:public/php-mcp-server.git",
+                "url": "https://code.devgnome.com/public/php-mcp-server.git",
                 "reference": "bce7f1670a88f26763cbd6eae7ba359decd3c07d"
             },
             "require": {
