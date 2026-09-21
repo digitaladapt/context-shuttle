@@ -1,19 +1,54 @@
-# context-shuttle — single-stage FrankenPHP image.
+# syntax=docker/dockerfile:1.7
+#
+# context-shuttle — multi-stage FrankenPHP image.
 #
 # Runtime: FrankenPHP serves public/ on :80 inside the container, non-root,
 # state on the /data volume. TLS is terminated upstream of the container.
 #
 # Secrets are injected at runtime as env vars, never baked in (§8.12).
 
-FROM dunglas/frankenphp:1-php8.5-trixie
+# ── Stage: deps — composer dependencies (layer-cached) ─────────────────────
+FROM dunglas/frankenphp:1-php8.5-trixie AS deps
 
-# Runtime set: ca-certificates (TLS for outbound tool calls), curl
-# (HEALTHCHECK), git (composer needs it to resolve the php-mcp/server
-# VCS repository — though vendor/ ships pre-built in CI-built images,
-# keep the image self-sufficient).
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+WORKDIR /app
+
+# Build-time set: git (composer needs it to resolve the php-mcp/server VCS
+# repository) and unzip (dist extraction). Neither reaches the runtime image.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Manifests first so dependency layers only rebuild when they change.
+# .dockerignore excludes host vendor/, so the image builds its own —
+# a locally built image is as valid as a CI-built one.
+COPY composer.json composer.lock symfony.lock ./
+RUN composer install --no-dev --no-interaction --prefer-dist \
+    --optimize-autoloader --no-scripts
+
+# ── Stage: build — full app + prod autoloader ──────────────────────────────
+FROM deps AS build
+
+COPY . .
+
+RUN composer dump-autoload --classmap-authoritative --no-dev \
+    && rm -rf var/cache/* var/log/*
+
+# Build-time smoke of the autoloader + config compile. APP_SECRET is a
+# placeholder — secrets are never baked in (§8.12); the real warm-up runs
+# at container start with injected secrets (entrypoint).
+RUN APP_ENV=prod APP_SECRET=build-secret bin/console cache:warmup || true \
+    && rm -rf var/cache/*
+
+# ── Stage: app — the runtime image ─────────────────────────────────────────
+FROM dunglas/frankenphp:1-php8.5-trixie AS app
+
+# Runtime set: ca-certificates (TLS for outbound tool calls) and curl
+# (HEALTHCHECK). No git/composer here — everything is compiled already.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates curl git \
+        ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
 # PHP configuration and FrankenPHP/Caddy app config
@@ -22,11 +57,8 @@ COPY docker/Caddyfile /etc/frankenphp/Caddyfile
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint
 RUN chmod +x /usr/local/bin/entrypoint
 
-# Application source (docs/ and tests/ are excluded by .dockerignore;
-# docker/ stays in the context for the COPYs above)
-COPY --link . /app
-
 WORKDIR /app
+COPY --from=build /app /app
 
 # Non-root runtime user (Guiding Light §6.4). uid/gid 1000, same
 # convention as task-loom/task-weaver.
