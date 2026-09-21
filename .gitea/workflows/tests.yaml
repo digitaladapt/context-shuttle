@@ -116,7 +116,7 @@ jobs:
           if [ ! -x "$tool" ]; then chmod +x "$tool"; fi
           # Report-only mode (conformance-blocking: false): annotate but
           # never fail. The violations still appear in the log.
-          "$tool" --profile="web-app" || \
+          "$tool" --profile="api-gateway" || \
             echo "::warning::Conformance violations found (non-blocking this run)."
 
       # NOTE: php-cs-fixer 3.x has no `--no-progress` flag. CI-friendly quiet
