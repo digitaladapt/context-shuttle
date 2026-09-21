@@ -10,8 +10,5 @@
 	root * public
 	encode zstd gzip
 
-	# Liveness and readiness are cheap; don't time them out
-	health_uri /health
-
 	php_server
 }
