@@ -6,6 +6,25 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Conform to Guiding Light §5/§6 env & image rules: `.env` and
+  `config/reference.php` are no longer committed (`.env` is local-only;
+  `reference.php` is a generated IDE-support dump), `.env.dev` removed,
+  `.gitignore`/`.dockerignore` aligned to the canonical baselines.
+- Dockerfile: non-root runtime user (`app`, uid/gid 1000), wires
+  `docker/Caddyfile` and `docker/entrypoint.sh` (previously unreferenced),
+  adds HEALTHCHECK against `GET /health`, installs ca-certificates/curl.
+- `LOG_LEVEL` env var is now actually read: both monolog handlers use
+  `%env(LOG_LEVEL)%` (default `info`), and `.env.example` documents it.
+
+### Added
+
+- `.env.example` now documents `DEFAULT_URI` (required by routing when
+  `.env` is absent).
+- `.ci/conformance.sh` + `css-control-size.py` vendored from guiding-light;
+  the CI conformance step now runs instead of silently skipping.
+
 ## [1.0.0] - 2026-09-20
 
 ### Added
