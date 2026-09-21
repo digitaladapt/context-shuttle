@@ -47,16 +47,16 @@ final class WeatherTool
     ) {}
 
     /**
-     * @param string      $location     either "lat,lon" or a place name ("Reykjavik")
-     * @param null|int    $forecastDays number of forecast days, 1-7 (default 3)
-     * @param null|string $units        "metric" or "imperial" (default metric)
+     * @param string      $location      either "lat,lon" or a place name ("Reykjavik")
+     * @param null|int    $forecast_days number of forecast days, 1-7 (default 3)
+     * @param null|string $units         "metric" or "imperial" (default metric)
      *
      * @return array<string, mixed>
      */
-    public function getWeather(string $location, ?int $forecastDays = null, ?string $units = null): array
+    public function getWeather(string $location, ?int $forecast_days = null, ?string $units = null): array
     {
         $units = ('imperial' === $units) ? 'imperial' : 'metric';
-        $days = $this->clampDays($forecastDays);
+        $days = $this->clampDays($forecast_days);
 
         [$lat, $lon, $label] = $this->resolveLocation($location);
 

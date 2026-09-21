@@ -53,7 +53,7 @@ Then implement the handler as a public method on a service:
 ```php
 final class WeatherTool
 {
-    public function getWeather(string $location, ?int $forecastDays = null, ?string $units = null): array
+    public function getWeather(string $location, ?int $forecast_days = null, ?string $units = null): array
     {
         // ...
     }
