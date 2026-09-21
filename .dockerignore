@@ -2,15 +2,13 @@
 # /docker and /docs are documentation/build inputs, not image content;
 # config/ is NEVER dockerignored (§6.3).
 
-# VCS
+# VCS & CI
 .git
 .gitignore
 .gitattributes
-
-# CI / tooling
-.ci
 .gitea
 .github
+.ci
 .phpunit.cache
 .php-cs-fixer.dist.php
 phpstan.neon.dist
@@ -20,12 +18,20 @@ rector.php
 # Local env — never bake secrets into images (§8.12)
 .env
 .env.local
+.env.local.php
 .env.*.local
+.env.dev
 .env.test
+host.env
+config/secrets/prod/prod.decrypt.private.php
 
-# Dev artifacts
-tests
+# Local runtime state
 var
+*.sqlite
+*.sqlite3
+*.db
+# Dev artifacts & host-side files not needed at runtime
+tests
 vendor
 node_modules
 importmap.php
@@ -37,8 +43,18 @@ docs
 compose.yaml
 Dockerfile
 .dockerignore
+.php-version
+.phpunit.cache
+.php-cs-fixer.cache
+.php-cs-fixer.dist.php
+phpstan.neon.dist
+phpstan-baseline.neon
+rector.php
+.editorconfig
 README.md
 CHANGELOG.md
 CONTRIBUTING.md
 SECURITY.md
-.php-version
+AGENTS.md
+CLAUDE.md
+*.md

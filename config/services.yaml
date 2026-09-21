@@ -2,6 +2,7 @@
 parameters:
     env(MCP_SERVER_NAME): 'context-shuttle'
     env(MCP_SERVER_VERSION): '1.0.0'
+    env(LOG_LEVEL): 'info'
 
 services:
     _defaults:

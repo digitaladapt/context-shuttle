@@ -5,10 +5,11 @@ monolog:
 
     handlers:
         # Main application log: JSON lines to stdout (12-factor).
+        # Level is tunable at runtime via LOG_LEVEL (default: info).
         main:
             type: stream
             path: php://stdout
-            level: info
+            level: '%env(LOG_LEVEL)%'
             channels: ['!mcp_invocation']
             formatter: monolog.formatter.json
 
@@ -19,6 +20,6 @@ monolog:
         mcp_invocation:
             type: stream
             path: php://stdout
-            level: info
+            level: '%env(LOG_LEVEL)%'
             channels: ['mcp_invocation']
             formatter: monolog.formatter.json
