@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "a03ba3c05baddbab6011edd89f37eff6",
+    "content-hash": "a10b9a13da2863e3d865b9781f68cd1b",
     "packages": [
         {
             "name": "doctrine/deprecations",
@@ -613,10 +613,10 @@
         },
         {
             "name": "php-mcp/server",
-            "version": "dev-feat/symfony-8-support",
+            "version": "3.3.99",
             "source": {
                 "type": "git",
-                "url": "git@code.devgnome.com:public/php-mcp-server.git",
+                "url": "https://code.devgnome.com/public/php-mcp-server.git",
                 "reference": "bce7f1670a88f26763cbd6eae7ba359decd3c07d"
             },
             "require": {
@@ -7940,18 +7940,9 @@
             "time": "2025-12-08T11:19:18+00:00"
         }
     ],
-    "aliases": [
-        {
-            "package": "php-mcp/server",
-            "version": "dev-feat/symfony-8-support",
-            "alias": "3.3.99",
-            "alias_normalized": "3.3.99.0"
-        }
-    ],
+    "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": {
-        "php-mcp/server": 20
-    },
+    "stability-flags": {},
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {
