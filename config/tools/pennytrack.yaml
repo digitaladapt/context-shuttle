@@ -1,0 +1,30 @@
+# Penny-track transactions tool — spending history from a self-hosted
+# penny-track instance. Requires PENNYTRACK_URL and PENNYTRACK_API_KEY
+# (read-only key is sufficient). Both REST (POST /tools/get_transactions)
+# and MCP (tools/call get_transactions) invoke the same handler.
+name: get_transactions
+description: >
+  List spending transactions (receipts) logged in penny-track within an
+  inclusive date range. Returns each transaction's amount, location,
+  business, category, tags, notes, and logged-at timestamp, plus
+  pagination metadata (page, limit, total, pages). Dates filter on when
+  the transaction was logged in penny-track. Configure the tool via
+  PENNYTRACK_URL and PENNYTRACK_API_KEY environment variables.
+handler: App\Tool\PennyTrack\TransactionsTool::getTransactions
+parameters:
+  from:
+    type: string
+    description: 'Start date of the range, YYYY-MM-DD (inclusive). E.g. 2025-01-01.'
+    required: true
+    pattern: '^\d{4}-\d{2}-\d{2}$'
+  to:
+    type: string
+    description: 'End date of the range, YYYY-MM-DD (inclusive, must not be before from). E.g. 2025-01-31.'
+    required: true
+    pattern: '^\d{4}-\d{2}-\d{2}$'
+  limit:
+    type: integer
+    description: 'Page size, 1-100. Defaults to penny-track''s default (10).'
+    required: false
+    minimum: 1
+    maximum: 100

@@ -3,6 +3,14 @@ parameters:
     env(MCP_SERVER_NAME): 'context-shuttle'
     env(MCP_SERVER_VERSION): '1.0.0'
     env(LOG_LEVEL): 'info'
+    env(PENNYTRACK_URL): ''
+    env(PENNYTRACK_API_KEY): ''
+
+    # Penny-track tool configuration. Empty defaults keep tool listing
+    # working on deployments without penny-track; the tool fails with a
+    # clear message when invoked unconfigured.
+    pennytrack_url: '%env(default::PENNYTRACK_URL)%'
+    pennytrack_api_key: '%env(default::PENNYTRACK_API_KEY)%'
 
 services:
     _defaults:
@@ -56,3 +64,9 @@ services:
 
     App\Tool\Echo\EchoTool:
         public: true
+
+    App\Tool\PennyTrack\TransactionsTool:
+        public: true
+        arguments:
+            $baseUrl: '%pennytrack_url%'
+            $apiKey: '%pennytrack_api_key%'
