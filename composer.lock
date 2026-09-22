@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "b1cedc063d7f4b38121d09e42a26420b",
+    "content-hash": "5782c3f9b3f8d9506ed858e921b3be3e",
     "packages": [
         {
             "name": "doctrine/deprecations",
@@ -617,7 +617,7 @@
             "source": {
                 "type": "git",
                 "url": "https://code.devgnome.com/public/php-mcp-server.git",
-                "reference": "bce7f1670a88f26763cbd6eae7ba359decd3c07d"
+                "reference": "715b4622312c2ef4cda174483ed2670e274c9bf4"
             },
             "require": {
                 "opis/json-schema": "^2.4",
@@ -690,7 +690,7 @@
                 "php model context protocol",
                 "server"
             ],
-            "time": "2026-09-20T16:15:30+00:00"
+            "time": "2026-09-22T19:33:17+00:00"
         },
         {
             "name": "phpdocumentor/reflection-common",
@@ -5293,16 +5293,16 @@
         },
         {
             "name": "friendsofphp/php-cs-fixer",
-            "version": "v3.95.26",
+            "version": "v3.95.27",
             "source": {
                 "type": "git",
                 "url": "https://github.com/PHP-CS-Fixer/PHP-CS-Fixer.git",
-                "reference": "11839dfaf25718e1617c522c3dde01ebf96c875f"
+                "reference": "1d0c68ee5f37446d8ad5970b82384cd1bb0a3317"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/PHP-CS-Fixer/PHP-CS-Fixer/zipball/11839dfaf25718e1617c522c3dde01ebf96c875f",
-                "reference": "11839dfaf25718e1617c522c3dde01ebf96c875f",
+                "url": "https://api.github.com/repos/PHP-CS-Fixer/PHP-CS-Fixer/zipball/1d0c68ee5f37446d8ad5970b82384cd1bb0a3317",
+                "reference": "1d0c68ee5f37446d8ad5970b82384cd1bb0a3317",
                 "shasum": ""
             },
             "require": {
@@ -5385,7 +5385,7 @@
             ],
             "support": {
                 "issues": "https://github.com/PHP-CS-Fixer/PHP-CS-Fixer/issues",
-                "source": "https://github.com/PHP-CS-Fixer/PHP-CS-Fixer/tree/v3.95.26"
+                "source": "https://github.com/PHP-CS-Fixer/PHP-CS-Fixer/tree/v3.95.27"
             },
             "funding": [
                 {
@@ -5393,7 +5393,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-09-19T19:04:32+00:00"
+            "time": "2026-09-22T09:54:55+00:00"
         },
         {
             "name": "myclabs/deep-copy",
