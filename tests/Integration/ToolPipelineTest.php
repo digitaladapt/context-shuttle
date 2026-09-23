@@ -53,6 +53,7 @@ final class ToolPipelineTest extends WebTestCase
         $names = array_column($data['tools'], 'name');
         self::assertContains('echo', $names);
         self::assertContains('get_weather', $names);
+        self::assertContains('get_transactions', $names);
 
         $echo = $data['tools'][array_search('echo', $names, true)];
         self::assertArrayHasKey('message', $echo['parameters']);
@@ -93,6 +94,7 @@ final class ToolPipelineTest extends WebTestCase
         $names = array_column($data['result']['tools'], 'name');
         self::assertContains('echo', $names);
         self::assertContains('get_weather', $names);
+        self::assertContains('get_transactions', $names);
     }
 
     public function test_mcp_tools_call_echo(): void
@@ -221,6 +223,25 @@ final class ToolPipelineTest extends WebTestCase
         ], content: '{}');
 
         self::assertResponseStatusCodeSame(422);
+    }
+
+    public function test_unconfigured_pennytrack_reports_clear_error(): void
+    {
+        // The test environment deliberately has neither PENNYTRACK_URL nor
+        // PENNYTRACK_API_KEY set (.env.local is not loaded for APP_ENV=test),
+        // which is exactly what a deployment without penny-track looks like.
+        // Invoking the tool must produce its friendly "not configured" error —
+        // not a TypeError from the container trying to inject null into the
+        // tool's string-typed constructor arguments.
+        $client = self::createClient();
+        $client->request('POST', '/tools/get_transactions', server: [
+            'CONTENT_TYPE' => 'application/json',
+        ], content: '{"from":"2026-01-01","to":"2026-01-31"}');
+
+        self::assertResponseStatusCodeSame(422);
+        $data = json_decode((string) $client->getResponse()->getContent(), true);
+
+        self::assertStringContainsString('PENNYTRACK_URL is not configured', $data['error']);
     }
 
     public function test_open_api_document(): void
