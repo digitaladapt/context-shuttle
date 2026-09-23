@@ -42,6 +42,13 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- CORS: `MCP-Protocol-Version` was missing from
+  `Access-Control-Allow-Headers`, so browsers blocked every post-initialize
+  request from spec-compliant MCP clients (llama.cpp's web UI, MCP
+  Inspector) with "CORS Missing Allow Header", even though the preflight
+  itself returned 204. The streamable HTTP spec requires the header on all
+  requests after `initialize`; header-less clients (curl, Postman) were
+  unaffected, which is why the failure only showed up in the browser.
 - `docker-bake.hcl`: `DOCKERHUB_TARGET` default was misspelled
   `digitaladapt/comtext-shuttle`; corrected to
   `digitaladapt/context-shuttle`.

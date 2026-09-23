@@ -30,6 +30,11 @@ use function str_starts_with;
  * "Vary: Origin" header keeps shared caches from serving one origin's
  * allowed response to a different origin.
  *
+ * The allowlist is the full set of headers a spec-compliant MCP client
+ * sends, not just the ones this server reads: a header the browser
+ * considers non-safelisted must be listed even when the server ignores it,
+ * or the preflight fails and the browser never issues the request.
+ *
  * Preflights (OPTIONS + Origin) are answered centrally here, before the
  * router runs, and every response is decorated on the way out — so all
  * endpoints (/mcp, /tools, /openapi.json, /health, /ready) get identical
@@ -47,7 +52,19 @@ use function str_starts_with;
 final class CorsSubscriber implements EventSubscriberInterface
 {
     private const ALLOW_METHODS = 'GET, POST, OPTIONS, DELETE';
-    private const ALLOW_HEADERS = 'Content-Type, Mcp-Session-Id, Last-Event-ID, Authorization';
+
+    /**
+     * Request headers a browser client may send cross-origin.
+     *
+     * MCP-Protocol-Version is mandatory for the streamable HTTP transport:
+     * the spec (2025-06-18, "Protocol Version Header") requires clients to
+     * send it on all requests after initialize. The official TypeScript SDK
+     * (used by llama.cpp's web UI, the MCP Inspector, and others) only starts
+     * sending it once initialize has negotiated a version, so the first
+     * preflight passes and every later one fails with Firefox's "CORS Missing
+     * Allow Header" if the header is not listed here.
+     */
+    private const ALLOW_HEADERS = 'Content-Type, Mcp-Session-Id, MCP-Protocol-Version, Last-Event-ID, Authorization';
     private const EXPOSE_HEADERS = 'Mcp-Session-Id';
     private const MAX_AGE = '600';
 
