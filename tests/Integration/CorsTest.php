@@ -74,6 +74,65 @@ final class CorsTest extends WebTestCase
         self::assertVaryOrigin($response);
     }
 
+    /**
+     * The MCP TypeScript SDK (llama.cpp's web UI, MCP Inspector) sends
+     * mcp-protocol-version on every request after initialize, as the spec's
+     * "Protocol Version Header" section requires. A header that is missing
+     * from Access-Control-Allow-Headers fails the preflight in the browser
+     * with "CORS Missing Allow Header" even though the server answers 204.
+     *
+     * @see https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#protocol-version-header
+     */
+    public function test_preflight_allows_every_header_a_spec_compliant_mcp_client_sends(): void
+    {
+        $client = self::createClient();
+        $client->request('OPTIONS', '/mcp', server: [
+            'HTTP_ORIGIN' => self::ORIGIN,
+            'HTTP_ACCESS_CONTROL_REQUEST_METHOD' => 'POST',
+            // Exactly what @modelcontextprotocol/sdk sends: content-type,
+            // accept, authorization (when configured), mcp-session-id (once
+            // initialized) and mcp-protocol-version (always, post-initialize).
+            'HTTP_ACCESS_CONTROL_REQUEST_HEADERS' => 'content-type, accept, authorization, mcp-session-id, mcp-protocol-version',
+        ]);
+
+        $response = $client->getResponse();
+        $allowHeaders = strtolower((string) $response->headers->get('Access-Control-Allow-Headers'));
+
+        self::assertTrue($response->isSuccessful());
+        // Accept and Content-Type are CORS-safelisted; the rest must be
+        // advertised or the browser blocks the actual request.
+        foreach (['authorization', 'mcp-session-id', 'mcp-protocol-version'] as $header) {
+            self::assertStringContainsString(
+                $header,
+                $allowHeaders,
+                "Access-Control-Allow-Headers must list '{$header}', got: '{$allowHeaders}'.",
+            );
+        }
+    }
+
+    /**
+     * Guards against the SDK's version negotiation changing shape: the
+     * transport starts sending mcp-protocol-version only after initialize, so
+     * both the first preflight and every later one must be allowed.
+     */
+    public function test_later_preflight_carries_mcp_protocol_version(): void
+    {
+        $client = self::createClient();
+        $client->request('OPTIONS', '/mcp', server: [
+            'HTTP_ORIGIN' => self::ORIGIN,
+            'HTTP_ACCESS_CONTROL_REQUEST_METHOD' => 'POST',
+            'HTTP_ACCESS_CONTROL_REQUEST_HEADERS' => 'content-type, mcp-protocol-version',
+        ]);
+
+        $response = $client->getResponse();
+
+        self::assertTrue($response->isSuccessful());
+        self::assertStringContainsString(
+            'mcp-protocol-version',
+            strtolower((string) $response->headers->get('Access-Control-Allow-Headers')),
+        );
+    }
+
     public function test_preflight_echoes_any_origin(): void
     {
         $client = self::createClient();
@@ -110,6 +169,7 @@ final class CorsTest extends WebTestCase
             'HTTP_ACCEPT' => 'application/json, text/event-stream',
             'HTTP_ORIGIN' => self::ORIGIN,
             'HTTP_AUTHORIZATION' => 'Bearer test-token',
+            'HTTP_MCP_PROTOCOL_VERSION' => '2025-03-26',
         ], content: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}');
 
         $response = $client->getResponse();

@@ -25,6 +25,13 @@ correct response — they just don't need it.
 Trade-off: no `notifications/*` push, no progress streaming. Acceptable for
 a tool registry whose tools are request/response.
 
+Note that statelessness does not remove the client's obligation to send
+`MCP-Protocol-Version`. The streamable HTTP spec requires it on every request
+after `initialize`, and browser clients cannot send it unless the server lists
+it in `Access-Control-Allow-Headers` — a header the server itself ignores still
+has to be advertised, or the preflight fails and the request never happens.
+See `CorsSubscriber::ALLOW_HEADERS`.
+
 ## Why YAML
 
 The registry's value is that **adding a tool is a leaf change**: one YAML
