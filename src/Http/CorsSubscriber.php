@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http;
 
+use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -34,6 +35,13 @@ use function str_starts_with;
  * endpoints (/mcp, /tools, /openapi.json, /health, /ready) get identical
  * CORS behavior.
  *
+ * Every response also carries a Cross-Origin-Resource-Policy (CORP) header.
+ * CORP guards "no-cors" subresource loads — <img>, <script>, fonts,
+ * `fetch(..., {mode: 'no-cors'})` — which never carry an Origin header and
+ * are therefore invisible to the CORS handshake. The policy is fixed
+ * server-side (never negotiated per request) and defaults to "same-site";
+ * CORS_RESOURCE_POLICY relaxes or tightens it. See CrossOriginResourcePolicy.
+ *
  * @internal
  */
 final class CorsSubscriber implements EventSubscriberInterface
@@ -42,6 +50,11 @@ final class CorsSubscriber implements EventSubscriberInterface
     private const ALLOW_HEADERS = 'Content-Type, Mcp-Session-Id, Last-Event-ID, Authorization';
     private const EXPOSE_HEADERS = 'Mcp-Session-Id';
     private const MAX_AGE = '600';
+
+    public function __construct(
+        #[Autowire('%env(enum:App\Http\CrossOriginResourcePolicy:default:cors_resource_policy:CORS_RESOURCE_POLICY)%')]
+        private CrossOriginResourcePolicy $resourcePolicy = CrossOriginResourcePolicy::SameSite,
+    ) {}
 
     public static function getSubscribedEvents(): array
     {
@@ -74,6 +87,7 @@ final class CorsSubscriber implements EventSubscriberInterface
         $response->headers->set('Access-Control-Allow-Methods', self::ALLOW_METHODS);
         $response->headers->set('Access-Control-Allow-Headers', self::ALLOW_HEADERS);
         $response->headers->set('Access-Control-Max-Age', self::MAX_AGE);
+        $this->applyResourcePolicy($response);
         $this->addVaryOrigin($response);
 
         $event->setResponse($response);
@@ -90,16 +104,20 @@ final class CorsSubscriber implements EventSubscriberInterface
 
         $request = $event->getRequest();
         $origin = $this->origin($request);
+        $response = $event->getResponse();
+
+        // CORP is origin-independent: no-cors embeds send no Origin header at
+        // all, so the header is applied before the Origin check below.
+        $this->applyResourcePolicy($response);
 
         if (null === $origin) {
             // Same-origin (or non-browser) request: no CORS headers needed,
             // but keep Vary: Origin so caches treat responses per-origin.
-            $this->addVaryOrigin($event->getResponse());
+            $this->addVaryOrigin($response);
 
             return;
         }
 
-        $response = $event->getResponse();
         $response->headers->set('Access-Control-Allow-Origin', $origin);
         $response->headers->set('Access-Control-Allow-Credentials', 'true');
         $response->headers->set('Access-Control-Expose-Headers', self::EXPOSE_HEADERS);
@@ -130,6 +148,11 @@ final class CorsSubscriber implements EventSubscriberInterface
         }
 
         return $origin;
+    }
+
+    private function applyResourcePolicy(Response $response): void
+    {
+        $response->headers->set('Cross-Origin-Resource-Policy', $this->resourcePolicy->value);
     }
 
     private function addVaryOrigin(Response $response): void

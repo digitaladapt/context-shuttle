@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace App\Tests\Integration;
 
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Symfony\Component\DependencyInjection\Exception\RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
 
+use function getenv;
 use function json_decode;
 use function preg_match;
+use function putenv;
 use function strtolower;
 
 /**
@@ -20,6 +23,12 @@ use function strtolower;
  * (never "*"), plus Access-Control-Allow-Credentials: true, plus
  * Vary: Origin. This is what lets the llama.cpp web UI talk to /mcp.
  *
+ * Every response additionally carries a Cross-Origin-Resource-Policy:
+ * "no-cors" subresource loads (images, scripts, fonts) never send an
+ * Origin header, so the policy is applied even when the credentialed-CORS
+ * branch is skipped. CORS_RESOURCE_POLICY selects the value; unset or
+ * empty means "same-site".
+ *
  * @internal
  *
  * @coversNothing
@@ -27,6 +36,20 @@ use function strtolower;
 final class CorsTest extends WebTestCase
 {
     private const ORIGIN = 'http://localhost:9670';
+
+    private ?string $previousResourcePolicy = null;
+
+    protected function setUp(): void
+    {
+        $this->previousResourcePolicy = false === ($policy = getenv('CORS_RESOURCE_POLICY')) ? null : $policy;
+    }
+
+    protected function tearDown(): void
+    {
+        self::setResourcePolicy($this->previousResourcePolicy);
+
+        parent::tearDown();
+    }
 
     public function test_preflight_to_mcp_is_answered_with_credentialed_cors(): void
     {
@@ -167,6 +190,103 @@ final class CorsTest extends WebTestCase
         self::assertNull($response->headers->get('Access-Control-Allow-Origin'));
     }
 
+    public function test_cross_origin_resource_policy_defaults_to_same_site(): void
+    {
+        self::setResourcePolicy(null);
+
+        $client = self::createClient();
+        $client->request('GET', '/health', server: ['HTTP_ORIGIN' => self::ORIGIN]);
+
+        $response = $client->getResponse();
+
+        self::assertResponseIsSuccessful();
+        self::assertSame('same-site', $response->headers->get('Cross-Origin-Resource-Policy'));
+    }
+
+    public function test_cross_origin_resource_policy_is_set_without_origin_header(): void
+    {
+        // "no-cors" subresource loads (<img>, <script>, <link rel=preload>)
+        // never send an Origin header, so the policy must be applied even
+        // though the credentialed-CORS branch is skipped.
+        self::setResourcePolicy(null);
+
+        $client = self::createClient();
+        $client->request('GET', '/tools');
+
+        $response = $client->getResponse();
+
+        self::assertResponseIsSuccessful();
+        self::assertNull($response->headers->get('Access-Control-Allow-Origin'));
+        self::assertSame('same-site', $response->headers->get('Cross-Origin-Resource-Policy'));
+        self::assertVaryOrigin($response);
+    }
+
+    public function test_empty_cors_resource_policy_falls_back_to_same_site(): void
+    {
+        self::setResourcePolicy('');
+
+        $client = self::createClient();
+        $client->request('GET', '/health', server: ['HTTP_ORIGIN' => self::ORIGIN]);
+
+        $response = $client->getResponse();
+
+        self::assertResponseIsSuccessful();
+        self::assertSame('same-site', $response->headers->get('Cross-Origin-Resource-Policy'));
+    }
+
+    public function test_cors_resource_policy_can_be_set_to_same_origin(): void
+    {
+        self::setResourcePolicy('same-origin');
+
+        $client = self::createClient();
+        $client->request('GET', '/health', server: ['HTTP_ORIGIN' => self::ORIGIN]);
+
+        $response = $client->getResponse();
+
+        self::assertResponseIsSuccessful();
+        self::assertSame('same-origin', $response->headers->get('Cross-Origin-Resource-Policy'));
+    }
+
+    public function test_cors_resource_policy_can_be_set_to_cross_origin(): void
+    {
+        self::setResourcePolicy('cross-origin');
+
+        $client = self::createClient();
+        $client->request('GET', '/health', server: ['HTTP_ORIGIN' => self::ORIGIN]);
+
+        $response = $client->getResponse();
+
+        self::assertResponseIsSuccessful();
+        self::assertSame('cross-origin', $response->headers->get('Cross-Origin-Resource-Policy'));
+    }
+
+    public function test_invalid_cors_resource_policy_fails_loudly(): void
+    {
+        self::setResourcePolicy('cross-site');
+
+        self::expectException(RuntimeException::class);
+        self::expectExceptionMessageMatches('/CrossOriginResourcePolicy/');
+
+        $client = self::createClient();
+        $client->request('GET', '/health');
+    }
+
+    public function test_preflight_carries_cross_origin_resource_policy(): void
+    {
+        self::setResourcePolicy(null);
+
+        $client = self::createClient();
+        $client->request('OPTIONS', '/mcp', server: [
+            'HTTP_ORIGIN' => self::ORIGIN,
+            'HTTP_ACCESS_CONTROL_REQUEST_METHOD' => 'POST',
+        ]);
+
+        $response = $client->getResponse();
+
+        self::assertTrue($response->isSuccessful());
+        self::assertSame('same-site', $response->headers->get('Cross-Origin-Resource-Policy'));
+    }
+
     private static function assertVaryOrigin(Response $response): void
     {
         $vary = (string) $response->headers->get('Vary', '');
@@ -176,5 +296,23 @@ final class CorsTest extends WebTestCase
             preg_match('/(^|,\s*)Origin(,|$)/i', $vary),
             "Expected 'Vary: Origin' on response, got: '{$vary}'.",
         );
+    }
+
+    /**
+     * Sets CORS_RESOURCE_POLICY for the next kernel boot. All three channels
+     * matter: Symfony checks $_ENV, then $_SERVER, then getenv().
+     */
+    private static function setResourcePolicy(?string $value): void
+    {
+        if (null === $value) {
+            putenv('CORS_RESOURCE_POLICY');
+            unset($_ENV['CORS_RESOURCE_POLICY'], $_SERVER['CORS_RESOURCE_POLICY']);
+
+            return;
+        }
+
+        putenv('CORS_RESOURCE_POLICY='.$value);
+        $_ENV['CORS_RESOURCE_POLICY'] = $value;
+        $_SERVER['CORS_RESOURCE_POLICY'] = $value;
     }
 }

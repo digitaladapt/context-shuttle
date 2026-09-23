@@ -27,6 +27,13 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `Cross-Origin-Resource-Policy` response header on every response
+  (preflight, CORS, same-origin, errors), configurable via
+  `CORS_RESOURCE_POLICY` (`same-site` default, `same-origin`, or
+  `cross-origin`). CORP is enforced on "no-cors" subresource loads
+  (images, scripts, fonts), which never send an Origin header, so it is
+  applied independently of the CORS handshake. An unrecognised value
+  fails loudly rather than silently falling back.
 - `.env.example` now documents `DEFAULT_URI` (required by routing when
   `.env` is absent).
 - `.ci/conformance.sh` + `css-control-size.py` vendored from the shared
