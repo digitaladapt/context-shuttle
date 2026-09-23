@@ -8,6 +8,13 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Composer package renamed `devgnome/context-shuttle` →
+  `digitaladapt/context-shuttle`, matching the GitHub and Docker Hub repos.
+- Public-facing links now use `code.digitaladapt.com/public/context-shuttle`
+  (the `code.devgnome.com` name is LAN-only).
+- `README.md` dependency note points at
+  `code.digitaladapt.com/public/php-mcp-server`; the `php-mcp/server` VCS
+  repository moved to the same public host.
 - Conform to Guiding Light §5/§6 env & image rules: `.env` and
   `config/reference.php` are no longer committed (`.env` is local-only;
   `reference.php` is a generated IDE-support dump), `.env.dev` removed,
@@ -22,8 +29,15 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 - `.env.example` now documents `DEFAULT_URI` (required by routing when
   `.env` is absent).
-- `.ci/conformance.sh` + `css-control-size.py` vendored from guiding-light;
-  the CI conformance step now runs instead of silently skipping.
+- `.ci/conformance.sh` + `css-control-size.py` vendored from the shared
+  standards repo; the CI conformance step now runs instead of silently
+  skipping.
+
+### Fixed
+
+- `docker-bake.hcl`: `DOCKERHUB_TARGET` default was misspelled
+  `digitaladapt/comtext-shuttle`; corrected to
+  `digitaladapt/context-shuttle`.
 
 ## [1.0.0] - 2026-09-20
 
@@ -49,5 +63,5 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 - Docker: FrankenPHP 1 / PHP 8.5 / trixie base, php.ini, Caddyfile,
   entrypoint (prod cache warmup).
 
-[Unreleased]: https://code.devgnome.com/digitaladapt/context-shuttle/compare/v1.0.0...HEAD
-[1.0.0]: https://code.devgnome.com/digitaladapt/context-shuttle/releases/tag/v1.0.0
+[Unreleased]: https://code.digitaladapt.com/public/context-shuttle/compare/v1.0.0...HEAD
+[1.0.0]: https://code.digitaladapt.com/public/context-shuttle/releases/tag/v1.0.0

@@ -8,7 +8,7 @@
 #         TAG=develop  for pushes to main.
 
 variable "DOCKERHUB_TARGET" {
-  default = "digitaladapt/comtext-shuttle"
+  default = "digitaladapt/context-shuttle"
   description = "Docker Hub repo/org (Gitea repo variable DOCKERHUB_TARGET)."
 }
 

@@ -1,5 +1,5 @@
 {
-    "name": "devgnome/context-shuttle",
+    "name": "digitaladapt/context-shuttle",
     "type": "project",
     "license": "MIT",
     "minimum-stability": "stable",
@@ -84,7 +84,7 @@
     "repositories": [{
         "name": "php-mcp-server",
         "type": "vcs",
-        "url": "https://code.devgnome.com/public/php-mcp-server.git"
+        "url": "https://code.digitaladapt.com/public/php-mcp-server.git"
     }],
     "require-dev": {
         "friendsofphp/php-cs-fixer": "^3.95.27",

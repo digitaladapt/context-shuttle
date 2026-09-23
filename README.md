@@ -160,7 +160,7 @@ composer test   # phpunit
 
 > **Dependency note:** `php-mcp/server` is currently pinned to a commit on the
 > `feat/symfony-8-support` branch of the project fork at
-> `code.devgnome.com/public/php-mcp-server` (12 commits ahead of the 3.3.0
+> `code.digitaladapt.com/public/php-mcp-server` (12 commits ahead of the 3.3.0
 > release; the release does not yet allow symfony/finder 8.x). When upstream
 > ships a tag allowing Symfony 8, replace the pinned constraint with that tag.
 
