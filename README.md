@@ -148,6 +148,7 @@ All configuration via environment variables — see `.env.example`. Key vars:
 |---|---|---|
 | `MCP_SERVER_NAME` | `context-shuttle` | MCP serverInfo name |
 | `MCP_SERVER_VERSION` | `1.0.0` | MCP serverInfo version |
+| `CORS_RESOURCE_POLICY` | `same-site` | `Cross-Origin-Resource-Policy` header: `same-site`, `same-origin`, or `cross-origin` |
 
 ## Development
 

@@ -12,6 +12,11 @@ parameters:
     pennytrack_url: '%env(string:default::PENNYTRACK_URL)%'
     pennytrack_api_key: '%env(string:default::PENNYTRACK_API_KEY)%'
 
+    # Cross-Origin-Resource-Policy applied to every response by
+    # CorsSubscriber when CORS_RESOURCE_POLICY is unset or empty
+    # (same-site | same-origin | cross-origin; see .env.example).
+    cors_resource_policy: 'same-site'
+
 services:
     _defaults:
         autowire: true
