@@ -31,6 +31,7 @@ final class TransactionsToolTest extends TestCase
     public function test_fetches_transactions_for_valid_range(): void
     {
         $client = new MockHttpClient();
+        $calls = [];
         $client->setResponseFactory(function ($method, $url, $options) use (&$calls) {
             $calls[] = ['method' => $method, 'url' => $url, 'options' => $options];
 
@@ -55,6 +56,7 @@ final class TransactionsToolTest extends TestCase
     public function test_sends_api_key_header(): void
     {
         $client = new MockHttpClient();
+        $calls = [];
         $client->setResponseFactory(function ($method, $url, $options) use (&$calls) {
             $calls[] = $options;
 
@@ -75,6 +77,7 @@ final class TransactionsToolTest extends TestCase
     public function test_passes_limit_through(): void
     {
         $client = new MockHttpClient();
+        $calls = [];
         $client->setResponseFactory(function ($method, $url, $options) use (&$calls) {
             $calls[] = $url;
 
@@ -91,6 +94,7 @@ final class TransactionsToolTest extends TestCase
     public function test_strips_trailing_slash_from_base_url(): void
     {
         $client = new MockHttpClient();
+        $calls = [];
         $client->setResponseFactory(function ($method, $url, $options) use (&$calls) {
             $calls[] = $url;
 
