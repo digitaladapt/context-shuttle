@@ -9,8 +9,8 @@ parameters:
     # Penny-track tool configuration. Empty defaults keep tool listing
     # working on deployments without penny-track; the tool fails with a
     # clear message when invoked unconfigured.
-    pennytrack_url: '%env(default::PENNYTRACK_URL)%'
-    pennytrack_api_key: '%env(default::PENNYTRACK_API_KEY)%'
+    pennytrack_url: '%env(string:default::PENNYTRACK_URL)%'
+    pennytrack_api_key: '%env(string:default::PENNYTRACK_API_KEY)%'
 
 services:
     _defaults:
