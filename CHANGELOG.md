@@ -58,6 +58,13 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
   adds HEALTHCHECK against `GET /health`, installs ca-certificates/curl.
 - `LOG_LEVEL` env var is now actually read: both monolog handlers use
   `%env(LOG_LEVEL)%` (default `info`), and `.env.example` documents it.
+- The `get_health_logs` tool now states its measurement units instead of
+  leaving them implicit: the description lists mmHg (systolic/diastolic),
+  bpm (heart rate), and lbs (weight), and every response carries the same
+  mapping as `meta.units`. vital-pulse's dashboard labels readings with
+  these units but its API returns bare numbers, so callers previously had
+  to infer them; any units vital-pulse reports itself take precedence
+  per field, with the defaults completing the map.
 
 ### Added
 
