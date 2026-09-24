@@ -244,6 +244,7 @@ final readonly class EventMapper
                 status: $this->text($component, 'STATUS'),
                 readonly: $object->calendar->readonly,
                 calendar: $object->calendar,
+                orderKey: $startDate,
             );
         }
 
@@ -253,8 +254,10 @@ final readonly class EventMapper
         // The id names a point in time in UTC, so it does not move when the
         // deployment changes TZ; `start` is that same instant rendered in TZ.
         // The two are deliberately different strings for one occurrence.
+        $composite = CompositeId::forOccurrence($uid, instant: $startInstant);
+
         return new CalendarEvent(
-            id: CompositeId::forOccurrence($uid, instant: $startInstant)->toString(),
+            id: $composite->toString(),
             uid: $uid,
             recurrenceId: $this->recurrenceId($component, allDay: false),
             summary: $this->text($component, 'SUMMARY') ?? '',
@@ -268,6 +271,9 @@ final readonly class EventMapper
             status: $this->text($component, 'STATUS'),
             readonly: $object->calendar->readonly,
             calendar: $object->calendar,
+            // The same UTC instant the id names, so ordering and the page
+            // cursor can never disagree with it.
+            orderKey: $composite->sortKey(),
         );
     }
 

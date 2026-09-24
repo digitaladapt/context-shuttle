@@ -22,6 +22,7 @@ final readonly class CalendarEvent
 {
     /**
      * @param list<string> $categories
+     * @param string       $orderKey   comparable position, **not serialized**
      */
     public function __construct(
         public string $id,
@@ -38,7 +39,27 @@ final readonly class CalendarEvent
         public ?string $status,
         public bool $readonly,
         public CalendarInfo $calendar,
+        private string $orderKey = '',
     ) {
+    }
+
+    /**
+     * The position of this row in the listing order.
+     *
+     * Deliberately *not* part of the output shape: it exists so that the
+     * ordering and the page cursor cannot disagree, and so neither has to
+     * compare `start` as text. `start` is rendered in `TZ`, where two rows an
+     * hour apart can be two hours apart in string order across a DST
+     * boundary; this key is UTC (or a bare date) and compares correctly.
+     *
+     * The format is chosen to sort lexicographically as a total order:
+     * `2026-10-09T15:00:00Z` for a timed occurrence, `2026-11-01` for an
+     * all-day one — a date sorts before any instant on the same day, which is
+     * a stable and reasonable place for an all-day event to sit.
+     */
+    public function orderKey(): string
+    {
+        return $this->orderKey;
     }
 
     /**
