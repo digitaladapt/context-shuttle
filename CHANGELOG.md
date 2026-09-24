@@ -40,11 +40,12 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
   first). One `TZ` env var is the only timezone in the system: all output
   is normalized into it, so a caller never reasons about offsets or DST.
   Paging is an opaque `cursor`/`next_cursor` with `limit` defaulting to
-  50, `readonly` ships from the start because CalDAV writes are coming,
-  and ICS is deferred to Phase 3 — `http(s)` only, since
-  `symfony/http-client` refuses `file://`, and shaped so it is
-  indistinguishable from a read-only CalDAV calendar. Planning only; no
-  code yet.
+  50, `readonly` ships from the start because CalDAV writes are coming
+  (per occurrence, flat on the event, since v1 expands every recurring
+  event and every row should be self-describing), and ICS is deferred to
+  Phase 3 — `http(s)` only, since `symfony/http-client` refuses `file://`,
+  and shaped so it is indistinguishable from a read-only CalDAV calendar.
+  Planning only; no code yet.
 
 
 ### Changed

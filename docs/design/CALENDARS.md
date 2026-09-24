@@ -24,7 +24,9 @@ surface: **when ICS arrives it must be indistinguishable from a read-only
 CalDAV calendar.** A caller should never learn that the deployment has one
 data source rather than another, so nothing provider-shaped may appear in
 the output. `readonly` is the only signal that will differ, which is why it
-exists from Phase 1 (see `readonly`, below).
+exists from Phase 1 (see `readonly`, below). Because v1 expands every
+recurring event, `readonly` sits on each occurrence rather than on the
+calendar, so every output row is self-describing.
 
 Non-goals for v1:
 
@@ -258,7 +260,7 @@ A bare array would leave `has_more` and `errors` nowhere to live.
 
 Each event: `id`, `uid`, `recurrence_id`, `summary`, `description`, `start`,
 `end`, `all_day`, `end_exclusive`, `location`, `categories`, `status`,
-`calendar`, `readonly`.
+`readonly`, `calendar` (`{name, href}`).
 
 Ordering is by start instant, then summary, so the order is stable across
 calls — a non-deterministic order makes a model's narration of a day wrong,
@@ -294,25 +296,34 @@ loop, and inconsistent with everything else here.
 events, small enough not to overwhelm a small model. Max 200, matching
 `get_health_logs`, rather than the 500 of the v0.2 draft.
 
-### `readonly` ⚠️
+### `readonly`, per occurrence ⚠️
 
-The event's `calendar` object carries `readonly` (review decision), and it
-is present **from Phase 1** even though nothing consumes it yet.
+Every occurrence row carries `readonly` (review decision), **flat on the
+event** rather than nested inside the `calendar` object.
 
-- The value is already known: discovery reads each calendar's privileges
-  (finding 10), and a CalDAV calendar announces read-only via
-  `<C:read-only/>` in its `current-user-privilege-set` or by omitting
-  `write`/`write-content`.
+- v1 **expands every recurring event**, so the output treats each occurrence
+  as its own event. A row that means "standup on Oct 9" has to be readable
+  on its own; making a caller correlate "can I edit this?" against a sibling
+  nested object is exactly the inference a flat row exists to avoid.
+- When writes land, the unit of mutation is the **occurrence** — "move
+  tomorrow's standup" is an occurrence-level operation, and the field a model
+  checks before attempting one belongs on the thing it is acting on.
+- The *value* is still calendar-derived: a calendar's privileges are uniform,
+  so every occurrence in a calendar reports the same `readonly`. This is not
+  a claim of per-occurrence variance, it is a refusal to make the caller go
+  and find it. If a server is ever found where one occurrence differs, the
+  shape already supports saying so.
 - It is the **only field that will distinguish an ICS calendar from a CalDAV
   one** when Phase 3 lands, and the only honest signal a caller gets that
   "edit this" is not an option — so it earns its place before the write
   tools exist rather than being retrofitted onto a shipped response shape.
-- It is per-**calendar**, not per-event, which is why it lives inside
-  `calendar` rather than beside `status`: a recurring series with one
-  read-only override is still one calendar whose writability is uniform.
+- This placement is tied to expanding by default. An un-expanded series view
+  would be per-series, so the field would need revisiting there — one
+  more reason not to build one without a reason (see *Deferred
+  deliberately*).
 - The v0.2 draft carried a separate per-event `editable` field. That is
-dropped: it duplicated `readonly` with no second source of truth, and two
-fields that must always agree is a bug waiting to happen.
+  still dropped: `readonly` is the single source of truth, and two fields
+  that must always agree is a bug waiting to happen.
 
 ### `calendar_get_event`
 
@@ -329,7 +340,8 @@ found → a normal tool error naming the id.
 
 VTODO, same shape with `summary`, `description`, `due` (nullable, in `TZ`,
 date-only when the task is date-only), `status`, `percent_complete`,
-`priority`, `completed_at`, `categories`, `calendar`, `readonly`.
+`priority`, `completed_at`, `categories`, `readonly`, `calendar`
+(`{name, href}`).
 
 - **Open tasks by default** (review decision): `include_completed` defaults
   to `false` and no date range is required, because "what's outstanding?" is
@@ -411,8 +423,8 @@ consequences that survive from the v0.2 draft:
   expose; freshness is the default. A feed has no `ETag`/`Last-Modified` to
   lean on either.
 - **It is read-only, and that is the whole difference.** One synthetic
-  `CalendarInfo` (named by `ICS_NAME`), `readonly: true`, everything else
-  identical to a CalDAV calendar's events. No `source` field, no provider
+  `CalendarInfo` (named by `ICS_NAME`), `readonly: true` on every row it
+  produces, everything else identical to a CalDAV calendar's events. No `source` field, no provider
   name in the output.
 
 **Deferred to Phase 3** (review decision): CalDAV only until the read path is
@@ -522,6 +534,9 @@ caller cannot infer. Nothing in it may name a data source.
   converting, and no offset reasoning is required;
 - `id` is a UTC instant (or a date, for all-day events) and is **not**
   textually equal to `start`; compare them as times if at all;
+- every row is self-describing — `readonly` sits on the event, not on its
+  calendar, so a single occurrence carries everything needed to decide
+  whether it can be edited;
 - all-day events are dates with no time component;
 - pass `cursor` back verbatim to page; `has_more: false` means the listing is
   complete;
@@ -565,8 +580,8 @@ fixtures that matter here. Every finding becomes a test:
   retries once then reports cleanly; `401`/`403` name the env var and never
   leak the password.
 - **`readonly`**: a calendar advertising read-only privileges reports
-  `readonly: true` and a writable one `false`, through the event's
-  `calendar` object.
+  `readonly: true` and a writable one `false`; every expanded occurrence of
+  a series carries it, so a single row is self-describing.
 - **No provider leakage**: a test asserting that no tool result and no YAML
   description contains `caldav`, `ics`, `source`, or `provider` — so Phase 3
   cannot introduce a provider-shaped field by accident.
@@ -603,34 +618,40 @@ so CI stays hermetic.
   configured editable calendar, with `If-Match` optimistic concurrency from
   day one: "update the meeting I just showed you" is the real use case, and
   last-write-wins corrupts a shared calendar. `readonly` is how a caller
-  knows which calendars this is even possible on.
-  day one: "update the meeting I just showed you" is the real use case, and
-  last-write-wins corrupts a shared calendar.
+  knows which occurrences it can act on.
 
-## Open questions
+## Deferred deliberately (YAGNI)
 
-1. **When exactly may a series be returned unexpanded?** A non-recurring
-event needs no expansion, and a large series inside a wide window is
-the paging problem in disguise. Returning `RRULE`-bearing components
-unexpanded with a `recurrence` marker would keep a listing small, but it
-hands the caller the recurrence rule — the reasoning the timezone rule
-exists to avoid. Deferred rather than decided: v1 expands.
-2. **`search` scope.** Summary/description/location is a guess. Whether it
-should also cover `categories` and attendee names is worth revisiting once
-real queries exist — a substring match on an attendee list is a privacy
-question as much as a relevance one.
-3. **Dedupe key when CalDAV and ICS overlap.** Phase 3 dedupes by
-`(uid, start)`. Two sources for the same meeting may not share a UID,
-and two genuinely distinct events may. Worth checking against a real
-feed before Phase 3 rather than guessing.
-4. **Task paging without a date range.** Open tasks default to no range, so
-there is no window to anchor a cursor to. Either the cursor anchors purely
-to `(due, id)` with nulls last, or tasks grow a required range. Phase 2
-will settle it.
-5. **Does `readonly` need to be per-occurrence?** A recurring series
-override cannot be individually read-only in CalDAV, so no — but if a
-server is ever found that disagrees, this is the field that would have to
-change shape, and callers would notice.
+Three questions came up in review and were closed with "if we run into it,
+we'll sort it out". They are recorded so the reasoning is visible rather
+than lost — but none of them blocks Phase 1, and none of them gets
+speculative code.
+
+1. **Un-expanded series.** v1 always expands, so a series is never returned
+   as an `RRULE`. If a wide-window listing over a large series ever makes
+   that hurt, the fix is a bounded window plus a "this series continues"
+   signal — not handing the caller the recurrence rule, which is the
+   reasoning the timezone rule exists to spare them. Revisit with a real
+   calendar and a query that is actually slow.
+2. **Dedupe key when CalDAV and ICS overlap.** Phase 3 dedupes by
+   `(uid, start)`. Two sources for the same meeting may not share a UID, and
+   two distinct events may. Nothing is built until ICS exists, and by then
+   there is a real feed to test against — picking a key now would be
+   inventing a rule with no evidence.
+3. **Task paging without a date range.** Open tasks default to no range, so
+   there is no window to anchor a cursor to. Either the cursor anchors to
+   `(due, id)` with undated tasks last, or tasks grow a required range.
+   Phase 2 settles it against real task data.
+
+The trade-off being taken: a speculative answer to any of these costs design
+surface now and would most likely be wrong. A design that documents the gap
+beats one that silently guesses.
+
+Settled in the third pass: `search` stays a case-insensitive substring over
+**summary/description/location** — good enough for now, and widening it
+(attendees, categories) is purely additive later. `readonly` is **per
+occurrence**, flat on the event rather than nested in `calendar`, because v1
+expands every recurring event and every output row should be self-describing.
 
 Resolved in review (second pass): ICS is **`http(s)` only** (`file://`
 dropped — not worth a parallel fetch path); paging is an **opaque
