@@ -4,6 +4,12 @@ Ordered by value; nothing here is scheduled until it is needed.
 
 ## Near term
 
+- **Alerts tool family** (`send_alert` now; `request_confirm` /
+  `request_input` next): provider-backed notifications (ntfy, Discord)
+  with a 5-level priority model, and interactive requests answered via a
+  single-use web form (`/ask/{id}`) that unblocks the tool call. Design:
+  `docs/design/ALERTS.md`.
+
 - **Persistent MCP sessions** (opt-in): cache-backed `SessionHandler`
   (`withSession('cache', ...)`) behind a flag, for clients that want
   server-initiated notifications. Default stays stateless.
@@ -26,6 +32,10 @@ Ordered by value; nothing here is scheduled until it is needed.
 
 ## Long term / contingent
 
+- **Provider-native interaction** (Discord buttons/components via a bot
+  instead of a webhook, ntfy `http` actions) behind the same tool contract
+  as the web-form flow, if the form proves insufficient. Phase 3 of
+  `docs/design/ALERTS.md`.
 - **Upstream the Symfony 8 constraint** of the php-mcp fork so the pin
   can move to a tagged release.
 - **Rector** adoption — only after coverage reaches 100% (§2.3 ordering).

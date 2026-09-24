@@ -6,6 +6,15 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `docs/design/ALERTS.md`: design draft for the alerts tool family —
+  `send_alert` (one-way, ntfy + Discord webhook providers, 5-level
+  priority model mapped per provider) with a path to interactive
+  `request_confirm` / `request_input` tools answered via a single-use
+  web form, using the blocking-tool-call pattern (as open-webui's
+  `ask_user`). Planning only; no code yet.
+
 ### Changed
 
 - CI now calls the shared reusable workflows instead of carrying its own
