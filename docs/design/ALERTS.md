@@ -1,6 +1,6 @@
 # ALERTS — context-shuttle
 
-**Status:** planning (v0.2 draft, revised after two review rounds) · supersedes nothing ·
+**Status:** planning (v0.3 draft, revised after three review rounds) · supersedes nothing ·
 sibling docs: `SPEC.md`, `DESIGN_CONSIDERATIONS.md`, `ROADMAP.md`
 
 ## Goal
@@ -21,11 +21,13 @@ Two tool families sharing one delivery abstraction:
    submit → the answer is fetched via `get_user_answer` (or the harness's own
    polling) and handed back to the LLM.
 
-Providers at launch: **ntfy** and **Discord** (webhook). The provider is
-behind an interface so more can follow (email, Slack, Telegram…) without
-touching tool contracts.
+Providers at launch: **ntfy** and **Discord** (webhook). Either or both
+can be enabled — a provider is on when its config env vars are present —
+and every enabled provider receives every alert (see Provider
+abstraction). The provider is behind an interface so more can follow
+(email, Slack, Telegram…) without touching tool contracts.
 
-## Decisions locked in review (v0.2)
+## Decisions locked in review (v0.3)
 
 - **Twig for the `/ask` form.** SPEC v1's "no Twig" non-goal was
   predicated on "no user interface"; the form is exactly one page, and
@@ -37,10 +39,11 @@ touching tool contracts.
   building it once in Phase 0 means Phase 2 adds nothing to the
   providers.
 - **Interactive requests are non-blocking by default.** `ask_user*`
-  returns an id immediately; `get_user_answer` takes the id and returns
-  `pending` / `answered` / `expired`. Blocking is an **opt-in**
-  (`wait: true`, bounded by `timeout_seconds`) and exists on the
-  free-text tool (`ask_user`) only — `ask_user_confirm` never blocks.
+  returns an id as soon as at least one provider has accepted the
+  message; `get_user_answer` takes the id and returns `pending` /
+  `answered` / `expired`. Blocking is an **opt-in** (`wait: true`,
+  bounded by `timeout_seconds`) and exists on the free-text tool
+  (`ask_user`) only — `ask_user_confirm` never blocks.
 - **Harness-side polling without LLM intervention.** A lightweight
   status endpoint lets a harness (task-loom) poll for answers itself,
   so its tool queue never blocks on a human and nothing depends on the
@@ -53,11 +56,26 @@ touching tool contracts.
   small models can tell which side of the coin they are on.
 - **Link trust: show the domain, skip the allowlist (Phase 0).**
   `send_alert`'s `link` stays unrestricted in v1; instead both
-  providers render the destination **host** (plus a short path where
-  it fits) in the notification's visible text, so the boss can judge a
-  tap before taking it. A domain/prefix allowlist was considered and
-  set aside as brittle (legitimate links are arbitrary; prefixes are
-  defeated by redirectors).
+  providers render a bounded, bolded `**domain**/path` line in the
+  notification's visible text (rules in *Visible-link formatting*), so
+  the boss can judge a tap before taking it. A domain/prefix allowlist
+  was considered and set aside as brittle (legitimate links are
+  arbitrary; prefixes are defeated by redirectors).
+- **Multi-provider by config presence (no `ALERT_PROVIDER`).** ntfy is
+  enabled iff `NTFY_TOPIC` is set; Discord iff `DISCORD_WEBHOOK_URL`
+  is set. Zero providers configured = the existing clear "not
+  configured" tool error; both configured = both receive every alert.
+- **Delivery semantics: report, persist only after ≥ 1 delivery.**
+  Mint the id first (it must be in the link), attempt every enabled
+  provider, then persist and return only if at least one delivered.
+  Partial success = success result carrying the per-provider report;
+  all-fail (or none configured) = `isError`, nothing persisted, no id
+  revealed. One provider failing never blocks the others.
+- **Interactive requests go out at priority 4** (fixed in v1):
+  important enough to act on; no `@`-mention — requests need a human
+  act, but they are not emergencies.
+- **No long-poll on the status endpoint in v1.** Short polling only;
+  revisit if poll volume proves a problem.
 
 ## Non-goals
 
@@ -68,9 +86,11 @@ touching tool contracts.
 - No inbound callbacks/webhooks in v1 — the shuttle would have to be
   reachable by the harness and per-request callback routing adds
   surface; polling covers the need. `callback_url` stays on the shelf
-  as a future option.
+  as a future option, and the status endpoint itself stays short-poll
+  (no long-poll hold in v1).
 - No multi-recipient routing, templating, or digesting/scheduling.
-  One deployment = one "boss" (the configured destination).
+  One deployment = one "boss"; "all enabled providers" is that same
+  boss on several channels, not several recipients.
 - No persistence layer for anything in Phase 0 (see Pending-request
   store for the one exception, which is cache, not ORM).
 
@@ -84,13 +104,13 @@ touching tool contracts.
 | `body` | string | – | markdown-ish detail, ≤ 4 000 chars |
 | `priority` | integer | – | 1–5, default 3 (see Priority model) |
 | `tags` | array[string] | – | ntfy tags / discord topic hints; ≤ 8 |
-| `link` | string | – | http(s) URL rendered as the notification's click action (ntfy `Click`, Discord embed link); destination host shown in the visible text |
+| `link` | string | – | http(s) URL rendered as the notification's click action (ntfy `Click`, Discord embed link); destination shown as a bounded `**domain**/path` line in the visible text (see Visible-link formatting) |
 | `link_label` | string | – | display label for the link, default "Open" |
 
-Returns a delivery receipt: provider name, provider message id (when
-the provider gives one), delivered priority, link attached. Result is
-*not* `isError`-worthy unless delivery itself failed — that distinction
-matters to the calling LLM.
+Returns a delivery report: per enabled provider, its name, its
+message id (when the provider gives one), and success/failure. Result
+is *not* `isError`-worthy unless **no** provider delivered (or none is
+configured) — that distinction matters to the calling LLM.
 
 Handler: `App\Tool\Alerts\AlertTool::sendAlert` as
 `config/tools/send_alert.yaml`, same registration dance as
@@ -107,6 +127,8 @@ The free-text side. Name reads on its own: "the LLM asks the user".
 | `timeout_seconds` | integer | max wait, default 600, max 3600 |
 | `wait` | boolean | default `false`; `true` blocks until answered/expired (the only tool with `wait` — see Interaction model) |
 
+Always sent at priority 4 (see Priority model).
+
 Non-blocking result: `{id, status: "pending", expires_at}`.
 `wait: true` result: `{status: "answered", answer: "…"}` or
 `{status: "expired"}`.
@@ -121,6 +143,8 @@ The yes/no side — same family, `confirm` suffix, no free text.
 | `confirm_label` / `dismiss_label` | string | button labels, defaults "Yes"/"No" |
 | `timeout_seconds` | integer | as above |
 | `wait` | – | **not offered** — a confirmation is quick by nature; the harness (or `get_user_answer`) handles the wait. Keeps one blocking tool, not two. |
+
+Always sent at priority 4 (see Priority model).
 
 Non-blocking result only: `{id, status: "pending", expires_at}`;
 the answer arrives as `answer: true|false` via `get_user_answer`.
@@ -163,12 +187,46 @@ id, echoed priority). Providers are HTTP-push only; they never know
 what a PendingRequest is. That separation is what keeps Phase 2 a
 composite of existing parts.
 
-The active provider is selected by env (`ALERT_PROVIDER`), instantiated
-per deployment, autowired through a `#[Target]`-bound constructor
-argument on the tool (the one-implementation-per-interface hint the
-conventions file prescribes). Multi-provider fan-out ("send to both")
-is a later config question, not a code change: the tool depends on an
-interface, and a composite provider is just another implementation.
+### Fan-out: config presence is the switch
+
+Providers are **collected, not selected**. Every configured provider
+receives every alert; there is no `ALERT_PROVIDER` scalar to keep in
+sync with reality. A provider is enabled iff its required config is
+present:
+
+| Provider | Required env | Optional env |
+|---|---|---|
+| `ntfy` | `NTFY_TOPIC` | `NTFY_URL` (default `https://ntfy.sh`), `NTFY_TOKEN` |
+| `discord` | `DISCORD_WEBHOOK_URL` | `DISCORD_MENTION_USER_ID` |
+
+Both set = both receive; one set = one receives; neither = the tool's
+existing clear "not configured" error (same shape as
+`get_transactions`' unconfigured path). A self-hosted ntfy server is a
+first-class case: `NTFY_URL` + `NTFY_TOKEN` are optional companions to
+the required topic, not alternatives to it.
+
+### Delivery semantics: report, persist only after ≥ 1 delivery
+
+Delivery is **best-effort across providers**: each attempt is isolated
+(one provider failing — timeout, 4xx, whatever — never blocks the
+others), and the tool returns a per-provider report:
+
+- **≥ 1 delivered** → success result. The report lists every provider
+  with its outcome; failures are noted in the report but are not
+  `isError` — the alert reached the boss. For interactive requests,
+  this is also the moment the PendingRequest is persisted and the id
+  returned (see Mint → send → persist).
+- **0 delivered, ≥ 1 configured** → `isError` with the per-provider
+  failure report. Nothing was persisted; for interactive requests no
+  id is revealed (nobody could ever answer it).
+- **0 configured** → the clear "not configured" error, before any
+  work happens.
+
+This is the "report, don't reroute" posture: the LLM sees exactly
+which channels worked so it can decide whether a human ever saw the
+message — without the shuttle inventing retry policy. The class this
+logic lives in (working name `AlertDispatcher`) is the seam where
+Phase 2 hangs; provider implementations stay dumb HTTP pushes.
 
 ## Priority model
 
@@ -186,6 +244,9 @@ Five levels, modelled after ntfy's (the richer of the two):
   renderings (`ntfyPriority(): int`, `discordColor(): int`,
   `mentions(): bool`). Mapping lives in one class, not scattered
   `match` statements.
+- **Interactive requests are pinned at level 4** in v1 — important
+  enough to act on, not an emergency; the tools surface no `priority`
+  parameter, and mention remains a level-5-only lever.
 - Discord colour = decimal int for the embed `color`. Mention at 5 is a
   **user id**, not `@everyone` — webhook `allowed_mentions` pins the
   allowed user and suppresses `@everyone`/`@here` unconditionally, so an
@@ -193,42 +254,93 @@ Five levels, modelled after ntfy's (the richer of the two):
 - Level-5 email-push / phone-push escalation is a future knob
   (`ALERT_ESCALATE_5_TO_EMAIL` or similar); out of scope for v1.
 
+## Visible-link formatting
+
+Both providers render the same bounded, readable destination line
+whenever an `actionUrl` is present. The click action is invisible
+until tapped, so this line is the only pre-tap signal the boss gets.
+One shared formatter, unit-tested once, rendered identically by every
+provider:
+
+- **Domain: rightmost 50 chars.** Long hosts keep the *right* end
+  (registrable domain + TLD) and elide on the left, which drops excess
+  subdomains first — the part a human would discard by eye anyway.
+- **Path: leftmost 50 chars.** Paths keep their head (the meaningful
+  prefix) and elide the tail.
+- **Domain is bolded** (`**domain**`), path is not, so the two halves
+  read as distinct at a glance. ntfy's markdown subset and Discord
+  embed bodies both render the bold.
+- An elided section gets a `…` at the cut edge so truncation is
+  visible rather than silent.
+- Query strings and fragments are omitted (path only) — they are noise
+  for a human, often long, and sometimes carry signed tokens that
+  should not be splashed on a lock screen.
+
+Example renders (the line appended after the human body text; these
+are actual formatter outputs, i.e. future test fixtures):
+
+    → **example.com**/run/42
+    → **example.com**/github/actions/runs/98765/jobs/123456789012345678…
+    → **…k8s.nightly.eu-west-1.staging.internal.example.com**/reports/q3
+    → **…k8s.nightly.eu-west-1.staging.internal.example.com**/reports/q3/artifacts/final-results-with-very-long…
+
+The first case shows both halves intact; the second a long path with
+intact domain; the third a long domain (subdomains elided, registrable
+domain kept) with a short path; the fourth both elided at once.
+
+The click target is untouched — shortening is display-only; the full
+URL rides the provider's link field (ntfy `click`, Discord embed URL).
+For interactive requests the same formatter runs on the `/ask/{id}`
+URL; the domain will be the shuttle's own host, which is the desired
+signal ("this is the shuttle's form, not some third party").
+
 ## Provider notes
 
 ### ntfy
 
-- Config: `NTFY_URL` (server, default `https://ntfy.sh`), `NTFY_TOPIC`,
-  optional `NTFY_TOKEN` for access-controlled servers.
+- Config: `NTFY_TOPIC` (required to enable; public topics are fine),
+  `NTFY_URL` (server, default `https://ntfy.sh` — set it for a
+  self-hosted server), `NTFY_TOKEN` (optional, for access-controlled
+  servers).
 - Publish via `POST {NTFY_URL}/{topic}` with `Title`, `Priority`, `Tags`
   headers; JSON body publish when we need ntfy extras — `click` for the
   link (opens in the ntfy app's in-app browser on mobile).
-- Link rendering: `click` carries the URL; the **visible body** gets a
-  trailing line like `→ example.com/run/42` (host + path, shortened),
-  because the click action itself is invisible until tapped. Keep it
-  in the message body, not the title — titles truncate first.
+- Link rendering: `click` carries the full URL; the **visible body**
+  gets the shared `**domain**/path` line (see Visible-link formatting),
+  appended after the human text, because the click action itself is
+  invisible until tapped. Keep it in the message body, not the title —
+  titles truncate first.
 - Interactive (Phase 2): the `/ask/{id}` URL rides the same `click`
-  field and gets the same visible-host treatment (host will be the
+  field and gets the same visible-domain treatment (host will be the
   shuttle's own hostname — expected and fine). Nothing new to invent.
 
 ### Discord
 
-- Config: `DISCORD_WEBHOOK_URL` (+ optional `DISCORD_MENTION_USER_ID`).
+- Config: `DISCORD_WEBHOOK_URL` (required to enable) + optional
+  `DISCORD_MENTION_USER_ID`.
 - `send_alert` maps to a webhook message with an embed (title, body,
   colour-by-priority, footer with tool name, link as the embed URL).
   Tags → embed fields or `[tag]` title prefixes; decide during
   implementation, keep it plain.
 - Link rendering: the embed URL powers the click-through, and the
-  embed body (or a field) gets the same `→ host/path` visible line as
-  ntfy, so the destination is readable before tapping.
+  embed body (or a field) gets the shared `**domain**/path` line (see
+  Visible-link formatting), so the destination is readable before
+  tapping.
 - `allowed_mentions: {users: [...]}` as above. Suppress notifications
   below priority 5 entirely by not mentioning.
 - Interactive (Phase 2): the `/ask/{id}` link is the embed URL, with
-  the same visible-host line — webhooks cannot create real buttons
+  the same visible-domain line — webhooks cannot create real buttons
   (that's Phase 3 territory).
 
 ## Interactive requests (Phase 2) — the interesting part
 
 ### Interaction model: non-blocking by default
+
+Interactive requests are **always sent at priority 4** in v1: a human
+act is needed, so it should look important, but the shuttle does not
+let an LLM escalate a question to `urgent` + mention. A fixed level
+also means the priority table's level-5 email/phone escalation stays
+decoupled from questions.
 
 The instinct is to make `ask_user` block until the human answers
 (open-webui's `ask_user` pattern). Two problems with making that the
@@ -259,11 +371,13 @@ keep the simpler options.
 ```
 LLM → ask_user(question)
         │
-        ├─ PendingRequest stored (id, TTL)
-        ├─ OutboundAlert{actionUrl: /ask/{id}} → provider → boss's phone
-        └─ returns {id, status: "pending", expires_at}   ← immediately
-                                   │
-boss opens /ask/{id}, types, submits ┘
+        ├─ mint id, build OutboundAlert{actionUrl: /ask/{id}}
+        ├─ dispatch to every enabled provider (best-effort, isolated)
+        │      ├─ ≥ 1 delivered → persist PendingRequest (id, TTL)
+        │      │     └─ returns {id, status: "pending", expires_at}  ← immediately
+        │      └─ 0 delivered → isError, nothing persisted, no id returned
+        │
+boss opens /ask/{id}, types, submits ┘  (id already delivered)
         │
         ▼
   store.status = answered, reply saved
@@ -275,10 +389,37 @@ task-loom polls GET /inputs/{id}  (or: LLM calls get_user_answer)
 answer fed back into the conversation → LLM proceeds
 ```
 
-With `wait: true` (on `ask_user` only), the third step instead blocks
-inside the handler (polling the store, ≤ `timeout_seconds`) and
-returns the final answer as the tool result — the open-webui shape,
-for clients that want it.
+With `wait: true` (on `ask_user` only) the handler does not return at
+the `pending` step: after persisting, it blocks — polling the store,
+≤ `timeout_seconds` — until the status changes, and returns the final
+answer as the tool result. That is the open-webui shape, for clients
+that want it.
+
+### Mint → send → persist (ordering, and why)
+
+The id must be **in the URL of the notification**, so it has to exist
+before the send. But a request that was never delivered should not be
+persisted (nobody will ever answer it; a store full of undeliverable
+pending requests is noise). So the order is:
+
+1. **Mint** the id (128-bit, URL-safe) in memory.
+2. **Send** to every enabled provider with `actionUrl: /ask/{id}`.
+3. **If ≥ 1 delivered:** persist the PendingRequest (status
+   `pending`, TTL from `timeout_seconds`) and return the id. **If 0
+   delivered:** persist nothing, return `isError` with the
+   per-provider report.
+
+The id is only *revealed* in step 3's response, so an all-fail call
+never leaks a dead id. The same ordering applies to an interactive
+`wait: true` call: even when the send fails, the tool must fail fast
+rather than block on an id nobody will ever see.
+
+One subtlety worth a test: two interactive requests racing on the
+same persistence backend are independent (distinct ids), but a
+`wait: true` handler's poll loop must not hold a lock that blocks the
+form's `POST` write — polling reads, the form writes; cache adapters
+that serialise writes (e.g. filesystem) are fine as long as the poll
+keeps its reads short.
 
 ### Status endpoint (harness surface)
 
@@ -288,6 +429,11 @@ for clients that want it.
   `mcp_invocation` log (a 5-second cadence over a 10-minute TTL is 120
   log lines per request). Tool-grade interactions go through
   `get_user_answer`; machine-grade polling goes here.
+- **Short polling only in v1** — no `?wait=30` long-poll hold. The
+  endpoint is trivially cacheable/stateless; a long-poll hold would
+  pin a PHP worker per waiting client, which is the exact cost this
+  whole design avoids on the tool side. Revisit only if real poll
+  volume proves it necessary (YAGNI for v1 per review).
 - Same id-as-capability model as the form: 128 random bits,
   single-use, expires with the request. No separate auth in v1; the
   form route and this endpoint are first in scope when the ROADMAP
@@ -317,25 +463,16 @@ for clients that want it.
 
 ## Open questions
 
-1. **Long-poll on the status endpoint.** `GET /inputs/{id}?wait=30`
-   (server holds up to 30 s until status changes) would cut poll
-   traffic ~an order of magnitude vs short polling. Nice-to-have or
-   YAGNI for v1?
-2. **Priority floor for interactive requests.** Floor at 4 (mention
-   the boss) since the request needs a human act? Or default 3 and let
-   the LLM raise it?
-3. **Provider failure during Phase 2.** If the notification can't be
-   delivered, the handler must fail fast (isError, no pending request
-   created) rather than mint an id nobody will ever see. Agreed in
-   principle; wording of the error to be settled in tests.
-4. **Fan-out / multiple channels.** One provider per deployment for
-   now; is "send to both ntfy and discord" wanted early enough to
-   design the env shape now (`ALERT_PROVIDER=ntfy` scalar vs a list)?
-5. **Visible-link format.** Proposed `→ host/path` (host always, path
-   truncated to fit). Exact separator/truncation rules to settle when
-   implementing the providers — one shared formatter, so ntfy and
-   Discord render identically and tests can pin the format in one
-   place.
+1. **Fan-out env shape.** Settled: presence-based (no
+   `ALERT_PROVIDER`), see Fan-out. Left open only whether a future
+   `ALERT_DISABLE=discord`-style kill switch is worth having when
+   someone wants config present but a channel muted — YAGNI until
+   asked for.
+2. **Visible-link cut details.** Format locked (rightmost-50 domain,
+   leftmost-50 path, bold domain, `…` at elided edges); what remains
+   is only the edge-case harvest at implementation time — e.g. a URL
+   with no path, or a bare-registrable-domain host — all pinned by the
+   formatter's own unit tests.
 
 Resolved in review:
 
@@ -347,18 +484,30 @@ Resolved in review:
 - One-vs-two interactive tools: two, plus the fetch tool (v0.1).
 - Tool naming: `ask_user`, `ask_user_confirm`, `get_user_answer` —
   maximum legibility for small models (v0.2).
-- Link trust: no allowlist in Phase 0; visible destination host instead
-  (v0.2). Allowlist remains a possible future knob if the threat model
-  changes — it is not required for the current one (single trusted
-  boss, links are for the boss's own eyeballs).
+- Link trust: no allowlist in Phase 0; visible destination domain
+  instead (v0.2); formatted as `**domain**/path` with the 50-char
+  rules above (v0.3).
+- Long-poll on status endpoint: no, v1 is short-poll only (v0.3).
+- Priority floor for interactive requests: fixed at 4, no
+  `@`-mention (v0.3).
+- Provider failure on interactive send: report per provider; require
+  ≥ 1 delivery to persist and return the id; all-fail = `isError`
+  with nothing persisted (v0.3).
+- Fan-out: presence-based multi-provider (both ntfy and Discord when
+  both configured), not a scalar or a list env (v0.3).
 
 ## Sequencing
 
 - **Phase 0 — `send_alert` with link**: `Priority` VO,
   `AlertProvider` interface, `OutboundAlert` (incl. `actionUrl`),
-  `NtfyProvider`, `DiscordProvider`, `AlertTool`, YAML, env vars, unit
-  tests (MockHttpClient, PennyTrack-style) + integration test for the
-  unconfigured-error path.
+  `NtfyProvider`, `DiscordProvider`, presence-based provider
+  collection + `AlertDispatcher` (best-effort fan-out, per-provider
+  report), visible-link formatter, `AlertTool`, YAML, env vars
+  (`NTFY_TOPIC`/`NTFY_URL`/`NTFY_TOKEN`,
+  `DISCORD_WEBHOOK_URL`/`DISCORD_MENTION_USER_ID`), unit tests
+  (MockHttpClient, PennyTrack-style) + integration tests for the
+  unconfigured-error path and for partial/all-fail provider
+  outcomes.
 - **Phase 1 — plumbing for interactive**: pending-request store on
   cache, `/ask` routes + Twig form, `GET /inputs/{id}` status
   endpoint, single-use semantics, tested without any provider
@@ -366,7 +515,8 @@ Resolved in review:
 - **Phase 2 — `ask_user`, `ask_user_confirm`, `get_user_answer`**:
   non-blocking handlers, `/ask/{id}` link through the existing
   `actionUrl` path, `wait: true` opt-in blocking on `ask_user` only,
-  end-to-end test with a fake provider.
+  mint → send → persist ordering, fixed priority 4, end-to-end test
+  with a fake provider (including a partial-delivery case).
 - **Phase 3 (contingent)** — provider-native interaction (Discord
   buttons/components via a bot instead of a webhook) *behind the same
   tool contract*, and/or inbound callbacks, only if the web form and
@@ -379,14 +529,20 @@ handlers plus a link render.
 ## Testing strategy
 
 - Unit: providers against `MockHttpClient` (assert headers, priority
-  mapping, click/embed-URL link rendering, visible-host line, and
-  `allowed_mentions` suppression — the @everyone guard is a
-  security-ish property, pin it with a test); `Priority` mapping
-  table; `PendingRequest` lifecycle.
+  mapping, click/embed-URL link rendering, and `allowed_mentions`
+  suppression — the @everyone guard is a security-ish property, pin it
+  with a test); the visible-link formatter (the four render cases in
+  Visible-link formatting become assertions; boundaries at exactly 50,
+  51 chars); `Priority` mapping table (incl. interactive-floor = 4);
+  `PendingRequest` lifecycle; `AlertDispatcher` (all-ok, one-fails,
+  all-fail — the last two via providers that throw).
 - Integration: unconfigured-tool friendly error (mirror the
-  `get_transactions` test); `/ask/{id}` GET/POST single-use flow via
-  `WebTestCase`; `GET /inputs/{id}` status transitions (pending →
-  answered, pending → expired by TTL); full `ask_user` round-trip
-  with a scripted fake provider (no real network; fake answers
-  immediately; a separate short-TTL test exercises expiry, and a
-  short-`timeout_seconds` test exercises `wait: true` both ways).
+  `get_transactions` test); multi-provider config detection (topic
+  only, webhook only, both, neither); `/ask/{id}` GET/POST single-use
+  flow via `WebTestCase`; `GET /inputs/{id}` status transitions
+  (pending → answered, pending → expired by TTL); full `ask_user`
+  round-trip with a scripted fake provider (no real network; fake
+  answers immediately; a separate short-TTL test exercises expiry, a
+  short-`timeout_seconds` test exercises `wait: true` both ways, and
+  an all-providers-fail test asserts no id is returned and nothing is
+  persisted).

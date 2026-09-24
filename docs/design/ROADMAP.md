@@ -6,9 +6,10 @@ Ordered by value; nothing here is scheduled until it is needed.
 
 - **Alerts tool family** (`send_alert` now; `ask_user` /
   `ask_user_confirm` + `get_user_answer` next): provider-backed
-  notifications (ntfy, Discord) with a 5-level priority model and link
-  support (destination host shown in the notification text);
-  interactive requests answered via a single-use web form (`/ask/{id}`),
+  notifications (ntfy, Discord) with a 5-level priority model and
+  bounded visible-link formatting; providers enabled by config
+  presence (either or both), self-hosted ntfy supported; interactive
+  requests (priority 4) answered via a single-use web form (`/ask/{id}`),
   non-blocking by default with opt-in blocking on `ask_user`, plus a
   harness-facing status endpoint (`GET /inputs/{id}`) so a harness can
   poll for answers without LLM intervention. Design:
