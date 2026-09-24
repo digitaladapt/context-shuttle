@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace App\ToolRegistry;
 
-use function array_key_exists;
-
 /**
  * A fully-validated tool definition loaded from a YAML file.
  *
@@ -31,7 +29,7 @@ final readonly class ToolDefinition
      *     minimum?: float|int,
      *     maximum?: float|int
      * }> $parameters JSON-Schema properties keyed by parameter name
-     * @param null|array{lat: float, lon: float} $defaultLocation special-cased default for the Weather tool
+     * @param array{lat: float, lon: float}|null $defaultLocation special-cased default for the Weather tool
      */
     public function __construct(
         public string $name,
@@ -39,7 +37,8 @@ final readonly class ToolDefinition
         public string $handler,
         public array $parameters,
         public ?array $defaultLocation = null,
-    ) {}
+    ) {
+    }
 
     /**
      * JSON Schema (draft 2020-12 style object schema) for the tool input.
@@ -59,7 +58,7 @@ final readonly class ToolDefinition
                 'type' => $def['type'],
             ];
             foreach (['description', 'default', 'enum', 'format', 'items', 'pattern', 'minimum', 'maximum'] as $key) {
-                if (array_key_exists($key, $def)) {
+                if (\array_key_exists($key, $def)) {
                     $property[$key] = $def[$key];
                 }
             }

@@ -7,29 +7,6 @@ namespace App\ToolRegistry;
 use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
 
-use function array_diff;
-use function array_key_exists;
-use function array_keys;
-use function basename;
-use function class_exists;
-use function explode;
-use function get_debug_type;
-use function glob;
-use function implode;
-use function in_array;
-use function is_array;
-use function is_bool;
-use function is_dir;
-use function is_numeric;
-use function is_scalar;
-use function is_string;
-use function method_exists;
-use function preg_match;
-use function realpath;
-use function sort;
-use function sprintf;
-use function str_contains;
-
 /**
  * Loads and validates tool definitions from YAML files in a directory.
  *
@@ -48,7 +25,8 @@ final class ToolLoader
 
     public function __construct(
         private string $toolsDir,
-    ) {}
+    ) {
+    }
 
     /**
      * @return list<ToolDefinition>
@@ -71,12 +49,7 @@ final class ToolLoader
         foreach ($files as $file) {
             $definition = $this->loadFile($file);
             if (isset($seenNames[$definition->name])) {
-                throw new ToolDefinitionException(sprintf(
-                    "Duplicate tool name '%s' (defined in %s and %s)",
-                    $definition->name,
-                    $seenNames[$definition->name],
-                    $file,
-                ));
+                throw new ToolDefinitionException(\sprintf("Duplicate tool name '%s' (defined in %s and %s)", $definition->name, $seenNames[$definition->name], $file));
             }
             $seenNames[$definition->name] = $file;
             $definitions[] = $definition;
@@ -95,22 +68,22 @@ final class ToolLoader
             throw new ToolDefinitionException("Invalid YAML in {$relative}: {$e->getMessage()}", 0, $e);
         }
 
-        if (!is_array($raw)) {
+        if (!\is_array($raw)) {
             throw new ToolDefinitionException("Tool file {$relative} must be a YAML mapping.");
         }
 
         $name = $raw['name'] ?? null;
-        if (!is_string($name) || !preg_match('/^[a-z][a-z0-9_]{0,63}$/', $name)) {
+        if (!\is_string($name) || !preg_match('/^[a-z][a-z0-9_]{0,63}$/', $name)) {
             throw new ToolDefinitionException("Tool file {$relative}: 'name' must be a lowercase snake_case string (max 64 chars).");
         }
 
         $description = $raw['description'] ?? null;
-        if (!is_string($description) || '' === $description) {
+        if (!\is_string($description) || '' === $description) {
             throw new ToolDefinitionException("Tool file {$relative}: 'description' must be a non-empty string.");
         }
 
         $handler = $raw['handler'] ?? null;
-        if (!is_string($handler) || !$this->isValidHandlerString($handler)) {
+        if (!\is_string($handler) || !$this->isValidHandlerString($handler)) {
             throw new ToolDefinitionException("Tool file {$relative}: 'handler' must be an FQCN or FQCN::method string.");
         }
         if (!class_exists($handler) && !str_contains($handler, '::')) {
@@ -127,28 +100,23 @@ final class ToolLoader
         }
 
         $parameters = $raw['parameters'] ?? [];
-        if (!is_array($parameters)) {
+        if (!\is_array($parameters)) {
             throw new ToolDefinitionException("Tool file {$relative}: 'parameters' must be a mapping of parameter definitions.");
         }
 
         /** @var array<string, array{type: string, description?: string, required?: bool, default?: mixed, enum?: list<mixed>, format?: string, items?: array<string, mixed>, pattern?: string, minimum?: float|int, maximum?: float|int}> $validated */
         $validated = [];
         foreach ($parameters as $paramName => $def) {
-            if (!is_string($paramName) || !preg_match('/^[a-z][a-z0-9_]{0,63}$/', $paramName)) {
+            if (!\is_string($paramName) || !preg_match('/^[a-z][a-z0-9_]{0,63}$/', $paramName)) {
                 throw new ToolDefinitionException("Tool file {$relative}: parameter name '{$paramName}' must be lowercase snake_case (max 64 chars).");
             }
-            if (!is_array($def)) {
+            if (!\is_array($def)) {
                 throw new ToolDefinitionException("Tool file {$relative}: parameter '{$paramName}' must be a mapping.");
             }
 
             $type = $def['type'] ?? null;
-            if (!is_string($type) || !in_array($type, self::ALLOWED_PARAMETER_TYPES, true)) {
-                throw new ToolDefinitionException(sprintf(
-                    "Tool file %s: parameter '%s': 'type' must be one of: %s",
-                    $relative,
-                    $paramName,
-                    implode(', ', self::ALLOWED_PARAMETER_TYPES),
-                ));
+            if (!\is_string($type) || !\in_array($type, self::ALLOWED_PARAMETER_TYPES, true)) {
+                throw new ToolDefinitionException(\sprintf("Tool file %s: parameter '%s': 'type' must be one of: %s", $relative, $paramName, implode(', ', self::ALLOWED_PARAMETER_TYPES)));
             }
 
             $unknown = array_diff(array_keys($def), self::ALLOWED_PARAMETER_KEYS);
@@ -156,38 +124,33 @@ final class ToolLoader
                 throw new ToolDefinitionException("Tool file {$relative}: parameter '{$paramName}': unknown keys: ".implode(', ', $unknown));
             }
 
-            if (array_key_exists('required', $def) && !is_bool($def['required'])) {
+            if (\array_key_exists('required', $def) && !\is_bool($def['required'])) {
                 throw new ToolDefinitionException("Tool file {$relative}: parameter '{$paramName}': 'required' must be a boolean.");
             }
 
-            if (array_key_exists('enum', $def)) {
-                if (!is_array($def['enum'])) {
+            if (\array_key_exists('enum', $def)) {
+                if (!\is_array($def['enum'])) {
                     throw new ToolDefinitionException("Tool file {$relative}: parameter '{$paramName}': 'enum' must be a list.");
                 }
                 if ([] === $def['enum']) {
                     throw new ToolDefinitionException("Tool file {$relative}: parameter '{$paramName}': 'enum' must not be empty.");
                 }
                 foreach ($def['enum'] as $value) {
-                    if (!is_scalar($value) && null !== $value) {
+                    if (!\is_scalar($value) && null !== $value) {
                         throw new ToolDefinitionException("Tool file {$relative}: parameter '{$paramName}': enum values must be scalars or null (got ".get_debug_type($value).').');
                     }
                 }
             }
 
-            if (array_key_exists('items', $def)) {
+            if (\array_key_exists('items', $def)) {
                 if ('array' !== $type) {
                     throw new ToolDefinitionException("Tool file {$relative}: parameter '{$paramName}': 'items' is only valid for array-typed parameters.");
                 }
-                if (!is_array($def['items']) || !isset($def['items']['type'])) {
+                if (!\is_array($def['items']) || !isset($def['items']['type'])) {
                     throw new ToolDefinitionException("Tool file {$relative}: parameter '{$paramName}': 'items' must be a mapping with a 'type' key.");
                 }
-                if (!in_array($def['items']['type'], self::ALLOWED_PARAMETER_TYPES, true)) {
-                    throw new ToolDefinitionException(sprintf(
-                        "Tool file %s: parameter '%s': 'items.type' must be one of: %s",
-                        $relative,
-                        $paramName,
-                        implode(', ', self::ALLOWED_PARAMETER_TYPES),
-                    ));
+                if (!\in_array($def['items']['type'], self::ALLOWED_PARAMETER_TYPES, true)) {
+                    throw new ToolDefinitionException(\sprintf("Tool file %s: parameter '%s': 'items.type' must be one of: %s", $relative, $paramName, implode(', ', self::ALLOWED_PARAMETER_TYPES)));
                 }
             }
 
@@ -195,10 +158,10 @@ final class ToolLoader
         }
 
         $defaultLocation = null;
-        if (array_key_exists('default_location', $raw)) {
+        if (\array_key_exists('default_location', $raw)) {
             $loc = $raw['default_location'];
             if (
-                !is_array($loc)
+                !\is_array($loc)
                 || !isset($loc['lat'], $loc['lon'])
                 || !is_numeric($loc['lat'])
                 || !is_numeric($loc['lon'])

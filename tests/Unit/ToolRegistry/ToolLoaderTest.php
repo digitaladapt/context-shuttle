@@ -7,14 +7,9 @@ namespace App\Tests\Unit\ToolRegistry;
 use App\ToolRegistry\ToolDefinition;
 use App\ToolRegistry\ToolDefinitionException;
 use App\ToolRegistry\ToolLoader;
+use Override;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Filesystem\Filesystem;
-
-use function array_map;
-use function file_put_contents;
-use function mkdir;
-use function sys_get_temp_dir;
-use function uniqid;
 
 /**
  * @internal
@@ -23,14 +18,16 @@ use function uniqid;
  */
 final class ToolLoaderTest extends TestCase
 {
-    private string $tmpDir;
+    private string $tmpDir = '';
 
+    #[Override]
     protected function setUp(): void
     {
         $this->tmpDir = sys_get_temp_dir().'/shuttle-tools-'.uniqid();
         mkdir($this->tmpDir, 0777, true);
     }
 
+    #[Override]
     protected function tearDown(): void
     {
         (new Filesystem())->remove($this->tmpDir);

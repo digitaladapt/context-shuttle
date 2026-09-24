@@ -8,15 +8,6 @@ use InvalidArgumentException;
 use RuntimeException;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
-use function count;
-use function implode;
-use function is_numeric;
-use function min;
-use function preg_match;
-use function round;
-use function sprintf;
-use function trim;
-
 /**
  * Weather tool backed by the Open-Meteo API (free, no API key).
  *
@@ -44,12 +35,13 @@ final class WeatherTool
 
     public function __construct(
         private HttpClientInterface $httpClient,
-    ) {}
+    ) {
+    }
 
     /**
      * @param string      $location      either "lat,lon" or a place name ("Reykjavik")
-     * @param null|int    $forecast_days number of forecast days, 1-7 (default 3)
-     * @param null|string $units         "metric" or "imperial" (default metric)
+     * @param int|null    $forecast_days number of forecast days, 1-7 (default 3)
+     * @param string|null $units         "metric" or "imperial" (default metric)
      *
      * @return array<string, mixed>
      */
@@ -74,11 +66,7 @@ final class WeatherTool
         ]);
 
         if ($response->getStatusCode() >= 400) {
-            throw new RuntimeException(sprintf(
-                'Open-Meteo returned HTTP %d for %s.',
-                $response->getStatusCode(),
-                $label,
-            ));
+            throw new RuntimeException(\sprintf('Open-Meteo returned HTTP %d for %s.', $response->getStatusCode(), $label));
         }
 
         $data = $response->toArray();
@@ -102,10 +90,10 @@ final class WeatherTool
             $lon = (float) $m[2];
 
             if ($lat < -90 || $lat > 90 || $lon < -180 || $lon > 180) {
-                throw new InvalidArgumentException(sprintf('Coordinates %s are out of range.', $location));
+                throw new InvalidArgumentException(\sprintf('Coordinates %s are out of range.', $location));
             }
 
-            return [$lat, $lon, sprintf('%.2f,%.2f', $lat, $lon)];
+            return [$lat, $lon, \sprintf('%.2f,%.2f', $lat, $lon)];
         }
 
         return $this->geocode($location);
@@ -127,13 +115,13 @@ final class WeatherTool
         ]);
 
         if ($response->getStatusCode() >= 400) {
-            throw new RuntimeException(sprintf('Geocoding failed for "%s" (HTTP %d).', $place, $response->getStatusCode()));
+            throw new RuntimeException(\sprintf('Geocoding failed for "%s" (HTTP %d).', $place, $response->getStatusCode()));
         }
 
         $results = $response->toArray()['results'] ?? [];
 
         if ([] === $results || !isset($results[0]['latitude'], $results[0]['longitude'])) {
-            throw new InvalidArgumentException(sprintf('Could not find a place named "%s". Try "lat,lon" coordinates instead.', $place));
+            throw new InvalidArgumentException(\sprintf('Could not find a place named "%s". Try "lat,lon" coordinates instead.', $place));
         }
 
         $first = $results[0];
@@ -163,7 +151,7 @@ final class WeatherTool
         $precipUnit = ('imperial' === $units) ? 'in' : 'mm';
 
         $forecast = [];
-        $nDays = min($days, count($daily['time'] ?? []));
+        $nDays = min($days, \count($daily['time'] ?? []));
         for ($i = 0; $i < $nDays; ++$i) {
             $forecast[] = [
                 'date' => $daily['time'][$i] ?? null,

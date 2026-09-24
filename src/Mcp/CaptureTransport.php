@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace App\Mcp;
 
 use Evenement\EventEmitterTrait;
+use Override;
 use PhpMcp\Schema\JsonRpc\Message;
 use PhpMcp\Server\Contracts\ServerTransportInterface;
 use React\Promise\PromiseInterface;
 
-use function count;
 use function React\Promise\resolve;
 
 /**
@@ -26,6 +26,7 @@ final class CaptureTransport implements ServerTransportInterface
     /** @var list<Message> */
     private array $sent = [];
 
+    #[Override]
     public function listen(): void
     {
         // no-op: driven by the Symfony request cycle
@@ -36,13 +37,13 @@ final class CaptureTransport implements ServerTransportInterface
      *
      * @return PromiseInterface<void> promise resolving once "sent"
      */
+    #[Override]
     public function sendMessage(Message $message, string $sessionId, array $context = []): PromiseInterface
     {
         $this->sent[] = $message;
 
         // resolve(null) is PromiseInterface<null>; the interface's
         // PromiseInterface<void> is PHPStan-notation for "no value".
-        // @phpstan-ignore return.type (null is the void value)
         return resolve(null);
     }
 
@@ -54,7 +55,7 @@ final class CaptureTransport implements ServerTransportInterface
 
     public function lastMessage(): ?Message
     {
-        return $this->sent[count($this->sent) - 1] ?? null;
+        return $this->sent[\count($this->sent) - 1] ?? null;
     }
 
     public function clear(): void
@@ -62,6 +63,7 @@ final class CaptureTransport implements ServerTransportInterface
         $this->sent = [];
     }
 
+    #[Override]
     public function close(): void
     {
         $this->removeAllListeners();

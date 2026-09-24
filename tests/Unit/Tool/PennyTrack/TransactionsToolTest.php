@@ -11,11 +11,6 @@ use RuntimeException;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
-use function json_encode;
-use function strtolower;
-
-use const JSON_THROW_ON_ERROR;
-
 /**
  * Unit tests for the penny-track transactions tool, using a mocked HTTP
  * client so no network is needed. Exercises the tool the way a caller
@@ -32,7 +27,7 @@ final class TransactionsToolTest extends TestCase
     {
         $client = new MockHttpClient();
         $calls = [];
-        $client->setResponseFactory(function ($method, $url, $options) use (&$calls) {
+        $client->setResponseFactory(static function ($method, $url, $options) use (&$calls) {
             $calls[] = ['method' => $method, 'url' => $url, 'options' => $options];
 
             return new MockResponse(json_encode([
@@ -40,7 +35,7 @@ final class TransactionsToolTest extends TestCase
                     ['id' => 1, 'amount' => 12.5, 'business' => 'Coffee Shop', 'category' => 'Dining'],
                 ],
                 'meta' => ['page' => 1, 'limit' => 10, 'total' => 1, 'pages' => 1],
-            ], JSON_THROW_ON_ERROR));
+            ], \JSON_THROW_ON_ERROR));
         });
 
         $tool = new TransactionsTool($client, 'https://penny.example.com', 'ro-key');
@@ -57,7 +52,7 @@ final class TransactionsToolTest extends TestCase
     {
         $client = new MockHttpClient();
         $calls = [];
-        $client->setResponseFactory(function ($method, $url, $options) use (&$calls) {
+        $client->setResponseFactory(static function ($method, $url, $options) use (&$calls) {
             $calls[] = $options;
 
             return new MockResponse('{"data": [], "meta": {"page": 1, "limit": 10, "total": 0, "pages": 0}}');
@@ -78,7 +73,7 @@ final class TransactionsToolTest extends TestCase
     {
         $client = new MockHttpClient();
         $calls = [];
-        $client->setResponseFactory(function ($method, $url, $options) use (&$calls) {
+        $client->setResponseFactory(static function ($method, $url, $options) use (&$calls) {
             $calls[] = $url;
 
             return new MockResponse('{"data": [], "meta": {"page": 1, "limit": 50, "total": 0, "pages": 0}}');
@@ -95,7 +90,7 @@ final class TransactionsToolTest extends TestCase
     {
         $client = new MockHttpClient();
         $calls = [];
-        $client->setResponseFactory(function ($method, $url, $options) use (&$calls) {
+        $client->setResponseFactory(static function ($method, $url, $options) use (&$calls) {
             $calls[] = $url;
 
             return new MockResponse('{"data": [], "meta": {"page": 1, "limit": 10, "total": 0, "pages": 0}}');

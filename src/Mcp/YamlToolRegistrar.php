@@ -10,10 +10,6 @@ use PhpMcp\Schema\Tool;
 use PhpMcp\Server\Registry;
 use Psr\Log\LoggerInterface;
 
-use function count;
-use function explode;
-use function str_contains;
-
 /**
  * Builds and registers YAML tools into the php-mcp/server Registry.
  */
@@ -22,7 +18,8 @@ final class YamlToolRegistrar
     public function __construct(
         private ToolRegistry $toolRegistry,
         private LoggerInterface $logger,
-    ) {}
+    ) {
+    }
 
     public function register(Registry $registry): void
     {
@@ -39,7 +36,7 @@ final class YamlToolRegistrar
 
         $schema = $definition->inputSchema();
 
-        /** @var array{type: 'object', properties: array<string, mixed>, required: null|array<string>} $inputSchema */
+        /** @var array{type: 'object', properties: array<string, mixed>, required: array<string>|null} $inputSchema */
         $inputSchema = [
             'type' => $schema['type'],
             'properties' => $schema['properties'],
@@ -57,7 +54,7 @@ final class YamlToolRegistrar
         $this->logger->info('Registered MCP tool from YAML.', [
             'tool' => $definition->name,
             'handler' => $definition->handler,
-            'parameter_count' => count($definition->parameters),
+            'parameter_count' => \count($definition->parameters),
         ]);
     }
 }

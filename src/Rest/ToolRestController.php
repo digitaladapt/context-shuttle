@@ -18,19 +18,6 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
-use function array_key_exists;
-use function array_map;
-use function assert;
-use function bin2hex;
-use function count;
-use function is_array;
-use function is_scalar;
-use function json_decode;
-use function json_last_error;
-use function random_bytes;
-use function sprintf;
-use function trim;
-
 /**
  * REST surface: POST /tools/{name} invokes a tool; GET /tools lists them.
  *
@@ -42,13 +29,14 @@ final class ToolRestController
     public function __construct(
         private McpServerFactory $factory,
         private ToolRegistry $registry,
-    ) {}
+    ) {
+    }
 
     public function list(): JsonResponse
     {
         return new JsonResponse([
             'tools' => array_map(
-                fn ($tool) => [
+                static fn ($tool) => [
                     'name' => $tool->name,
                     'description' => $tool->description,
                     'parameters' => $tool->parameters,
@@ -63,7 +51,7 @@ final class ToolRestController
         $definition = $this->registry->get($name);
         if (null === $definition) {
             return new JsonResponse([
-                'error' => sprintf("Tool '%s' not found.", $name),
+                'error' => \sprintf("Tool '%s' not found.", $name),
                 'available_tools' => $this->registry->names(),
             ], Response::HTTP_NOT_FOUND);
         }
@@ -71,7 +59,7 @@ final class ToolRestController
         $payload = $request->request->all();
         if ([] === $payload && 'json' === $request->getContentTypeFormat()) {
             $decoded = json_decode($request->getContent(), true);
-            $payload = is_array($decoded) ? $decoded : [];
+            $payload = \is_array($decoded) ? $decoded : [];
         }
         $payload = $request->query->all() + $payload;
 
@@ -88,7 +76,7 @@ final class ToolRestController
         // Mark the session initialized so tools/call is allowed without a
         // JSON-RPC initialize handshake (REST is inherently stateless).
         $session = $stack->sessionManager->getSession($sessionId);
-        assert(null !== $session);
+        \assert(null !== $session);
         $session->set('initialized', true);
         $session->set('protocol_version', Protocol::LATEST_PROTOCOL_VERSION);
         $session->set('client_info', ['name' => 'context-shuttle-rest', 'version' => '1.0.0']);
@@ -159,7 +147,7 @@ final class ToolRestController
     private function applyDefaults(array $parameters, array $payload): array
     {
         foreach ($parameters as $paramName => $def) {
-            if (!array_key_exists($paramName, $payload) && array_key_exists('default', $def)) {
+            if (!\array_key_exists($paramName, $payload) && \array_key_exists('default', $def)) {
                 $payload[$paramName] = $def['default'];
             }
         }
@@ -179,9 +167,9 @@ final class ToolRestController
             }
         }
 
-        if (1 === count($texts)) {
+        if (1 === \count($texts)) {
             $decoded = json_decode($texts[0], true);
-            if (JSON_ERROR_NONE === json_last_error() && (is_array($decoded) || is_scalar($decoded))) {
+            if (\JSON_ERROR_NONE === json_last_error() && (\is_array($decoded) || \is_scalar($decoded))) {
                 return $decoded;
             }
 

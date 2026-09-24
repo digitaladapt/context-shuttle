@@ -12,4 +12,6 @@ use RuntimeException;
  * Deliberately a boot-time failure: an invalid tool definition must never
  * silently degrade the MCP or REST surface.
  */
-final class ToolDefinitionException extends RuntimeException {}
+final class ToolDefinitionException extends RuntimeException
+{
+}

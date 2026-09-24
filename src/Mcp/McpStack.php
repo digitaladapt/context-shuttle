@@ -18,5 +18,6 @@ final class McpStack
     public function __construct(
         public readonly Protocol $protocol,
         public readonly SessionManager $sessionManager,
-    ) {}
+    ) {
+    }
 }

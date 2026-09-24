@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# conformance.sh — checks a lyra Symfony project against the shared standard.
+# conformance.sh — checks a Symfony project against the shared standard.
 #
 # Usage:
 #   conformance.sh --profile=web-app|auth-gateway|api-gateway [--json] [path]
@@ -108,6 +108,12 @@ not_has_file()    { [ ! -f "$1" ]; }
 # file_contains <path> <pattern>   (silently false if path missing)
 file_contains()   { [ -f "$1" ] && grep -qE "$2" "$1"; }
 # any_file_contains <pattern> <path...>
+#
+# NOTE: matches anywhere in the file, INCLUDING comments. That is correct for
+# rules about the mere presence of a string, and WRONG for rules about a
+# directive. When checking a directive ("CI calls X"), anchor the pattern to
+# the line form that the directive actually takes — see ci-reusable-workflows
+# below for why that matters.
 any_file_contains() {
   local pat="$1"; shift
   grep -rlE "$pat" "$@" >/dev/null 2>&1
@@ -203,10 +209,36 @@ check "ci-composer-validate" \
   "§8.3" \
   any_file_contains 'composer validate' .gitea/workflows
 
+# Anchored to a REAL `uses:` line, not the string anywhere in the file.
+#
+# The previous form matched the string anywhere, which gave it a false-positive
+# mode that made it worse than useless: a repo that INLINED the shared workflow
+# still carries a header comment saying it was "inlined from
+# private/ci/.gitea/workflows/...", so the check went green in exactly the repos
+# that had drifted. It reported compliance precisely where compliance was absent.
+#
+# `uses:` is what the description always claimed to test.
 check "ci-reusable-workflows" \
-  "CI calls shared workflows from lyra/ci (not five drift surfaces)" \
+  "CI calls shared workflows from private/ci (not five drift surfaces)" \
   "§8.2" \
-  any_file_contains 'lyra/ci/\.gitea/workflows' .gitea/workflows
+  any_file_contains '^[[:space:]]*uses:[[:space:]]*private/ci/\.gitea/workflows' .gitea/workflows
+
+# A bake file describes WHICH Dockerfile stage to build. buildx does not check
+# that the stage exists until build time, and `bake --print` — the obvious way
+# to validate one — happily resolves a target that names no stage, because it
+# never reads the Dockerfile. So a typo there reaches CI and fails after the
+# push. This is the check that buildx is missing.
+#
+# SKIPPED when there is no bake file: most repos use the `action` backend and
+# have none, and absence is not a violation.
+check_opt "bake-target-exists" \
+  "docker-bake.hcl targets a stage that exists in the Dockerfile" \
+  "§6.2" \
+  'command -v python3 >/dev/null 2>&1 && [ -f docker-bake.hcl ]' \
+  bash -c '
+    [ -f "$CONFORMANCE_DIR/validate-bake.py" ] || exit 0
+    exec "$CONFORMANCE_DIR/validate-bake.py" docker-bake.hcl Dockerfile
+  '
 
 $OUTPUT_JSON || echo ""
 $OUTPUT_JSON || echo "Hygiene & layout"

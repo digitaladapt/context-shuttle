@@ -6,10 +6,6 @@ namespace App\Tests\Integration;
 
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 
-use function array_column;
-use function array_search;
-use function json_decode;
-
 /**
  * Full-pipeline integration tests through the Symfony kernel.
  *
