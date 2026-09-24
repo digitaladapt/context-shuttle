@@ -7,6 +7,11 @@ parameters:
     env(PENNYTRACK_API_KEY): ''
     env(VITALPULSE_URL): ''
     env(VITALPULSE_API_KEY): ''
+    env(NTFY_URL): ''
+    env(NTFY_TOPIC): ''
+    env(NTFY_TOKEN): ''
+    env(DISCORD_WEBHOOK_URL): ''
+    env(DISCORD_MENTION_USER_ID): ''
 
     # Penny-track tool configuration. Empty defaults keep tool listing
     # working on deployments without penny-track; the tool fails with a
@@ -17,6 +22,17 @@ parameters:
     # Vital-pulse tool configuration, same pattern as penny-track above.
     vitalpulse_url: '%env(string:default::VITALPULSE_URL)%'
     vitalpulse_api_key: '%env(string:default::VITALPULSE_API_KEY)%'
+
+    # Alerts tool configuration (send_alert). Channels are enabled by
+    # presence: NTFY_TOPIC turns ntfy on, DISCORD_WEBHOOK_URL turns
+    # Discord on — set both to deliver on both. Empty defaults keep
+    # tool listing working on unconfigured deployments; invocation
+    # fails with a clear message instead.
+    ntfy_url: '%env(string:default::NTFY_URL)%'
+    ntfy_topic: '%env(string:default::NTFY_TOPIC)%'
+    ntfy_token: '%env(string:default::NTFY_TOKEN)%'
+    discord_webhook_url: '%env(string:default::DISCORD_WEBHOOK_URL)%'
+    discord_mention_user_id: '%env(string:default::DISCORD_MENTION_USER_ID)%'
 
     # Cross-Origin-Resource-Policy applied to every response by
     # CorsSubscriber when CORS_RESOURCE_POLICY is unset or empty
@@ -43,6 +59,13 @@ services:
             - '../src/ToolRegistry/ToolDefinitionException.php'
             - '../src/ToolRegistry/ToolLoader.php'
             - '../src/ToolRegistry/ToolRegistryPass.php'
+            # Alerts value objects: plain construction-time types, not
+            # services (their scalar/array constructors are not
+            # autowirable by design).
+            - '../src/Tool/Alerts/Priority.php'
+            - '../src/Tool/Alerts/OutboundAlert.php'
+            - '../src/Tool/Alerts/DeliveryReceipt.php'
+            - '../src/Tool/Alerts/DispatchReport.php'
 
     # ── Controllers ────────────────────────────────────────────────────
     App\Mcp\McpController:
@@ -87,3 +110,23 @@ services:
         arguments:
             $baseUrl: '%vitalpulse_url%'
             $apiKey: '%vitalpulse_api_key%'
+
+    # ── Alerts ─────────────────────────────────────────────────────────
+    # send_alert fans out best-effort across every enabled provider; a
+    # provider is on iff its required env var is present (presence-based,
+    # not selected). Provider scalar config comes from the parameters
+    # above; the app.alert_provider tag comes from each provider class's
+    # #[AutoconfigureTag] attribute.
+    App\Tool\Alerts\AlertTool:
+        public: true
+
+    App\Tool\Alerts\NtfyProvider:
+        arguments:
+            $baseUrl: '%ntfy_url%'
+            $topic: '%ntfy_topic%'
+            $token: '%ntfy_token%'
+
+    App\Tool\Alerts\DiscordProvider:
+        arguments:
+            $webhookUrl: '%discord_webhook_url%'
+            $mentionUserId: '%discord_mention_user_id%'

@@ -51,6 +51,7 @@ final class ToolPipelineTest extends WebTestCase
         self::assertContains('get_weather', $names);
         self::assertContains('get_transactions', $names);
         self::assertContains('get_health_logs', $names);
+        self::assertContains('send_alert', $names);
 
         $echo = $data['tools'][array_search('echo', $names, true)];
         self::assertArrayHasKey('message', $echo['parameters']);
@@ -93,6 +94,7 @@ final class ToolPipelineTest extends WebTestCase
         self::assertContains('get_weather', $names);
         self::assertContains('get_transactions', $names);
         self::assertContains('get_health_logs', $names);
+        self::assertContains('send_alert', $names);
     }
 
     public function test_mcp_tools_call_echo(): void
