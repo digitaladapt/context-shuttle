@@ -34,10 +34,28 @@ use Throwable;
  *    month buckets (meta.aggregated = true). The payload is passed
  *    through unchanged either way; the meta block tells the caller
  *    which shape "data" has.
+ *  - Readings are unit-less in the API while the dashboard labels them
+ *    (mmHg for blood pressure, bpm for heart rate, lbs for weight), so
+ *    every response is annotated with a meta.units map. A units map
+ *    that a future vital-pulse version sends itself takes precedence
+ *    per field; the defaults fill any field it does not mention.
  */
 final class HealthLogsTool
 {
     private const DATE_PATTERN = '/^\d{4}-\d{2}-\d{2}$/';
+
+    /**
+     * Measurement units for each reading field, as labelled in
+     * vital-pulse's own dashboard. The API delivers bare numbers; this
+     * mapping is attached to every response under meta.units so callers
+     * never have to infer the unit from a value's magnitude.
+     */
+    private const UNITS = [
+        'systolic' => 'mmHg',
+        'diastolic' => 'mmHg',
+        'heart_rate' => 'bpm',
+        'weight' => 'lbs',
+    ];
 
     public function __construct(
         private HttpClientInterface $httpClient,
@@ -55,7 +73,7 @@ final class HealthLogsTool
      * @param int|null $limit page size, 1-200 (defaults to vital-pulse's 200)
      * @param int|null $page  1-based page number (defaults to 1)
      *
-     * @return array<string, mixed>
+     * @return array<string, mixed> payload annotated with meta.units
      */
     public function getHealthLogs(string $from, string $to, ?int $limit = null, ?int $page = null): array
     {
@@ -115,6 +133,23 @@ final class HealthLogsTool
         if (!isset($data['data']) || !\is_array($data['data'])) {
             throw new RuntimeException('Unexpected response shape from vital-pulse: missing "data" array.');
         }
+
+        // The API returns bare numbers; annotate the units its dashboard
+        // shows (mmHg, bpm, lbs). A units map that a future vital-pulse
+        // version sends itself takes precedence per field; the defaults
+        // fill any field it does not mention, so the map is complete.
+        $meta = $data['meta'] ?? null;
+        if (!\is_array($meta)) {
+            $meta = [];
+        }
+
+        $units = $meta['units'] ?? null;
+        if (!\is_array($units)) {
+            $units = [];
+        }
+
+        $meta['units'] = array_merge(self::UNITS, $units);
+        $data['meta'] = $meta;
 
         return $data;
     }

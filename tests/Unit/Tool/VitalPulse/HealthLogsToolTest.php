@@ -15,9 +15,9 @@ use Symfony\Component\HttpClient\Response\MockResponse;
  * Unit tests for the vital-pulse health logs tool, using a mocked HTTP
  * client so no network is needed. Exercises the tool the way a caller
  * would: valid ranges (including the end-of-day expansion that makes
- * the "to" date genuinely inclusive), pagination params, invalid
- * dates, bad limits, missing config, auth failures, and upstream
- * errors.
+ * the "to" date genuinely inclusive), pagination params, unit
+ * annotation (including upstream deference), invalid dates, bad
+ * limits, missing config, auth failures, and upstream errors.
  *
  * @internal
  *
@@ -126,6 +126,69 @@ final class HealthLogsToolTest extends TestCase
         self::assertTrue($result['meta']['aggregated']);
         self::assertSame(432, $result['meta']['total']);
         self::assertSame(14, $result['data'][0]['count']);
+    }
+
+    public function test_annotates_units_on_each_response(): void
+    {
+        $client = new MockHttpClient(new MockResponse(json_encode([
+            'data' => [
+                ['id' => 1, 'timestamp' => '2025-01-05T08:00:00+00:00', 'systolic' => 120, 'diastolic' => 78, 'heart_rate' => 62, 'weight' => 82.5, 'emoji' => '🙂'],
+            ],
+            'meta' => ['page' => 1, 'limit' => 200, 'total' => 1, 'pages' => 1, 'aggregated' => false],
+        ], \JSON_THROW_ON_ERROR)));
+
+        $tool = new HealthLogsTool($client, 'https://pulse.example.com', 'ro-key');
+
+        $result = $tool->getHealthLogs('2025-01-01', '2025-01-31');
+
+        // vital-pulse's API returns bare numbers; the tool must state
+        // the units its dashboard shows: mmHg, bpm, and lbs.
+        self::assertSame([
+            'systolic' => 'mmHg',
+            'diastolic' => 'mmHg',
+            'heart_rate' => 'bpm',
+            'weight' => 'lbs',
+        ], $result['meta']['units']);
+
+        // The rest of the payload is untouched.
+        self::assertSame(1, $result['meta']['total']);
+        self::assertSame(82.5, $result['data'][0]['weight']);
+    }
+
+    public function test_defers_to_upstream_units_when_present(): void
+    {
+        // If a future vital-pulse sends its own meta.units (e.g. a
+        // per-instance kg/lb setting), those values win per field; the
+        // defaults fill in anything it leaves out, so the map stays
+        // complete.
+        $client = new MockHttpClient(new MockResponse('{"data": [], "meta": {"page": 1, "limit": 200, "total": 0, "pages": 0, "aggregated": false, "units": {"weight": "kg"}}}'));
+
+        $tool = new HealthLogsTool($client, 'https://pulse.example.com', 'ro-key');
+
+        $result = $tool->getHealthLogs('2025-01-01', '2025-01-31');
+
+        self::assertSame([
+            'systolic' => 'mmHg',
+            'diastolic' => 'mmHg',
+            'heart_rate' => 'bpm',
+            'weight' => 'kg',
+        ], $result['meta']['units']);
+    }
+
+    public function test_annotates_units_even_without_meta_block(): void
+    {
+        $client = new MockHttpClient(new MockResponse('{"data": [{"id": 1, "timestamp": "2025-01-05T08:00:00+00:00", "systolic": 120, "diastolic": 78, "heart_rate": 62, "weight": 82.5, "emoji": "🙂"}]}'));
+
+        $tool = new HealthLogsTool($client, 'https://pulse.example.com', 'ro-key');
+
+        $result = $tool->getHealthLogs('2025-01-01', '2025-01-31');
+
+        self::assertSame([
+            'systolic' => 'mmHg',
+            'diastolic' => 'mmHg',
+            'heart_rate' => 'bpm',
+            'weight' => 'lbs',
+        ], $result['meta']['units']);
     }
 
     public function test_strips_trailing_slash_from_base_url(): void
