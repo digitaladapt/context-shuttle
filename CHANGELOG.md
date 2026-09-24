@@ -21,17 +21,24 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
   status endpoint for polling without LLM intervention. Planning only;
   no code yet.
 - `docs/design/CALENDARS.md`: design draft for calendar read access —
-  CalDAV events first (`calendar_list_calendars`,
-  `calendar_list_events`, `calendar_get_event`), then tasks, then an ICS
-  provider, then CalDAV writes. Written against a live Radicale 3.8.0
-  instance rather than from documentation, which surfaced four things
-  that changed the design: server-side `expand` shifts recurring events
-  by an hour across a DST boundary (so expansion is client-side);
-  occurrences of one series share a UID (so occurrences are addressed by
-  a composite `id`); an unresolvable `TZID` silently parses as UTC (so
-  offsets are flagged, never guessed); and a fixed-offset `TZID` like
-  `UTC-04:00` throws in `sabre/vobject` (so per-item failures are
-  isolated instead of failing the listing). Planning only; no code yet.
+  CalDAV events first (`calendar_list_events`, `calendar_get_event`),
+  then tasks, then an ICS provider, then CalDAV writes. Written against a
+  live Radicale 3.8.0 instance rather than from documentation, which
+  surfaced the things that changed the design: server-side `expand`
+  shifts recurring events by an hour across a DST boundary (so expansion
+  is client-side); occurrences of one series share a UID (so occurrences
+  are addressed by a composite `UID::Occurrence` id); an unresolvable
+  `TZID` silently parses as UTC and `TimeZoneUtil` returns UTC for a
+  fixed-offset `TZID` (so offsets are recovered or counted, never
+  guessed); a fixed-offset `TZID` like `UTC-04:00` throws in
+  `sabre/vobject` (so per-item failures are isolated, reported as one
+  human-readable `errors` string with UID+calendar detail in the log);
+  converting an all-day `DATE` through a timezone shifts the day (so
+  `DATE` values are never converted); and `symfony/http-client` rejects
+  `file://` (so an ICS URL that is a local file needs its own fetch
+  path). One `TZ` env var is the only timezone in the system: all output
+  is normalized into it, so a caller never reasons about offsets or DST.
+  Planning only; no code yet.
 
 
 ### Changed
