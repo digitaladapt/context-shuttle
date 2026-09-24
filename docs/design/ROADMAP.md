@@ -5,9 +5,12 @@ Ordered by value; nothing here is scheduled until it is needed.
 ## Near term
 
 - **Alerts tool family** (`send_alert` now; `request_confirm` /
-  `request_input` next): provider-backed notifications (ntfy, Discord)
-  with a 5-level priority model, and interactive requests answered via a
-  single-use web form (`/ask/{id}`) that unblocks the tool call. Design:
+  `request_input` + `get_input` next): provider-backed notifications
+  (ntfy, Discord) with a 5-level priority model and link support; 
+  interactive requests answered via a single-use web form (`/ask/{id}`),
+  non-blocking by default with an opt-in blocking mode, plus a
+  harness-facing status endpoint (`GET /inputs/{id}`) so a harness can
+  poll for answers without LLM intervention. Design:
   `docs/design/ALERTS.md`.
 
 - **Persistent MCP sessions** (opt-in): cache-backed `SessionHandler`

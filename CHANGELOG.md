@@ -10,10 +10,12 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 - `docs/design/ALERTS.md`: design draft for the alerts tool family —
   `send_alert` (one-way, ntfy + Discord webhook providers, 5-level
-  priority model mapped per provider) with a path to interactive
-  `request_confirm` / `request_input` tools answered via a single-use
-  web form, using the blocking-tool-call pattern (as open-webui's
-  `ask_user`). Planning only; no code yet.
+  priority model mapped per provider, link support from day one) with
+  a path to interactive `request_confirm` / `request_input` +
+  `get_input` tools answered via a single-use web form (Twig),
+  non-blocking by default with opt-in blocking, and a harness-facing
+  status endpoint for polling without LLM intervention. Planning only;
+  no code yet.
 
 ### Changed
 
