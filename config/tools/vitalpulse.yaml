@@ -1,0 +1,39 @@
+# Vital-pulse health logs tool — health readings (blood pressure, heart
+# rate, weight) from a self-hosted vital-pulse instance. Requires
+# VITALPULSE_URL and VITALPULSE_API_KEY (a read-only key is sufficient,
+# if one is configured). Both REST (POST /tools/get_health_logs) and
+# MCP (tools/call get_health_logs) invoke the same handler.
+name: get_health_logs
+description: >
+  List health readings (blood pressure, heart rate, weight, mood emoji)
+  logged in vital-pulse within an inclusive UTC date range, newest
+  first. Returns each reading's timestamp, systolic, diastolic, heart
+  rate, weight, and emoji, plus pagination metadata (page, limit,
+  total, pages). When more than 200 readings match, vital-pulse
+  auto-aggregates them into day/week/month buckets and sets
+  meta.aggregated to true. Dates filter on the reading timestamp; the
+  end date covers the whole day. Configure the tool via VITALPULSE_URL
+  and VITALPULSE_API_KEY environment variables.
+handler: App\Tool\VitalPulse\HealthLogsTool::getHealthLogs
+parameters:
+  from:
+    type: string
+    description: 'Start date of the range, YYYY-MM-DD (inclusive, midnight UTC). E.g. 2025-01-01.'
+    required: true
+    pattern: '^\d{4}-\d{2}-\d{2}$'
+  to:
+    type: string
+    description: 'End date of the range, YYYY-MM-DD (inclusive through the end of the day UTC, must not be before from). E.g. 2025-01-31.'
+    required: true
+    pattern: '^\d{4}-\d{2}-\d{2}$'
+  limit:
+    type: integer
+    description: 'Page size, 1-200. Defaults to vital-pulse''s default (200).'
+    required: false
+    minimum: 1
+    maximum: 200
+  page:
+    type: integer
+    description: '1-based page number. Defaults to 1. Only used when the result is not aggregated.'
+    required: false
+    minimum: 1
