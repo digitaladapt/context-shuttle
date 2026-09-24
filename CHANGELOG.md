@@ -6,6 +6,21 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `docs/design/ALERTS.md`: design draft for the alerts tool family —
+  `send_alert` (one-way, ntfy + Discord webhook providers behind one
+  interface, both enabled by config presence — mix and match, incl.
+  self-hosted ntfy; 5-level priority model mapped per provider; link
+  support from day one with a bounded `**domain**/path` line in the
+  visible text) with a path to the interactive `ask_user` /
+  `ask_user_confirm` / `get_user_answer` tools (fixed priority 4)
+  answered via a single-use web form (Twig), non-blocking by default
+  with opt-in blocking on `ask_user`, mint → send → persist ordering
+  with a per-provider delivery report, and a harness-facing short-poll
+  status endpoint for polling without LLM intervention. Planning only;
+  no code yet.
+
 ### Changed
 
 - CI now calls the shared reusable workflows instead of carrying its own
