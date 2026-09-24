@@ -6,10 +6,6 @@ namespace App\ToolRegistry;
 
 use Psr\Log\LoggerInterface;
 
-use function array_keys;
-use function array_values;
-use function count;
-
 /**
  * Runtime registry of all tools defined in config/tools/*.yaml.
  *
@@ -32,7 +28,7 @@ final class ToolRegistry
         }
 
         $logger?->info('Tool registry initialised.', [
-            'tool_count' => count($this->tools),
+            'tool_count' => \count($this->tools),
             'tool_names' => array_keys($this->tools),
         ]);
     }
@@ -61,6 +57,6 @@ final class ToolRegistry
 
     public function count(): int
     {
-        return count($this->tools);
+        return \count($this->tools);
     }
 }

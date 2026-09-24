@@ -10,13 +10,6 @@ use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Throwable;
 
-use function checkdate;
-use function is_array;
-use function preg_match;
-use function rtrim;
-use function sprintf;
-use function trim;
-
 /**
  * Penny-track transactions tool backed by the receipts API.
  *
@@ -34,7 +27,8 @@ final class TransactionsTool
         private HttpClientInterface $httpClient,
         private string $baseUrl,
         private string $apiKey,
-    ) {}
+    ) {
+    }
 
     /**
      * List transactions (receipts) logged in penny-track within an
@@ -45,7 +39,7 @@ final class TransactionsTool
      *
      * @param string   $from  start date, YYYY-MM-DD (inclusive)
      * @param string   $to    end date, YYYY-MM-DD (inclusive, >= from)
-     * @param null|int $limit page size, 1-100 (defaults to penny-track's 10)
+     * @param int|null $limit page size, 1-100 (defaults to penny-track's 10)
      *
      * @return array<string, mixed>
      */
@@ -78,7 +72,7 @@ final class TransactionsTool
 
             $status = $response->getStatusCode();
         } catch (TransportExceptionInterface $e) {
-            throw new RuntimeException(sprintf('Could not reach penny-track at %s: %s', $config['url'], $e->getMessage()), 0, $e);
+            throw new RuntimeException(\sprintf('Could not reach penny-track at %s: %s', $config['url'], $e->getMessage()), 0, $e);
         }
 
         if (401 === $status || 403 === $status) {
@@ -94,12 +88,12 @@ final class TransactionsTool
                 // status already captured; body is best-effort for context
             }
 
-            throw new RuntimeException(sprintf('Penny-track returned HTTP %d for %s: %s', $status, $url, trim($body)));
+            throw new RuntimeException(\sprintf('Penny-track returned HTTP %d for %s: %s', $status, $url, trim($body)));
         }
 
         $data = $response->toArray();
 
-        if (!isset($data['data']) || !is_array($data['data'])) {
+        if (!isset($data['data']) || !\is_array($data['data'])) {
             throw new RuntimeException('Unexpected response shape from penny-track: missing "data" array.');
         }
 
@@ -144,7 +138,7 @@ final class TransactionsTool
     }
 
     /**
-     * @return null|int normalized limit or null to use penny-track's default
+     * @return int|null normalized limit or null to use penny-track's default
      */
     private function validateLimit(?int $limit): ?int
     {
@@ -179,7 +173,7 @@ final class TransactionsTool
         }
 
         if (!preg_match('#^https?://#', $url)) {
-            throw new RuntimeException(sprintf('PENNYTRACK_URL must start with http:// or https:// (got "%s").', $url));
+            throw new RuntimeException(\sprintf('PENNYTRACK_URL must start with http:// or https:// (got "%s").', $url));
         }
 
         return ['url' => rtrim($url, '/'), 'key' => $key];

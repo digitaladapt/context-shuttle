@@ -4,15 +4,12 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration;
 
+use Override;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\DependencyInjection\Exception\RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
 
 use function getenv;
-use function json_decode;
-use function preg_match;
-use function putenv;
-use function strtolower;
 
 /**
  * Browser-style CORS tests: preflight (OPTIONS + Origin +
@@ -39,11 +36,13 @@ final class CorsTest extends WebTestCase
 
     private ?string $previousResourcePolicy = null;
 
+    #[Override]
     protected function setUp(): void
     {
-        $this->previousResourcePolicy = false === ($policy = getenv('CORS_RESOURCE_POLICY')) ? null : $policy;
+        $this->previousResourcePolicy = false === ($policy = \getenv('CORS_RESOURCE_POLICY')) ? null : $policy;
     }
 
+    #[Override]
     protected function tearDown(): void
     {
         self::setResourcePolicy($this->previousResourcePolicy);

@@ -7,11 +7,6 @@ namespace App\Rest;
 use App\ToolRegistry\ToolRegistry;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
-use function array_map;
-use function array_merge;
-use function explode;
-use function implode;
-
 /**
  * Generates an OpenAPI 3.1 document describing every registered tool.
  *
@@ -24,7 +19,8 @@ final class OpenApiController
         private ToolRegistry $registry,
         private string $serverName,
         private string $serverVersion,
-    ) {}
+    ) {
+    }
 
     public function __invoke(): JsonResponse
     {

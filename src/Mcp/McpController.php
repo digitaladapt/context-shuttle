@@ -15,13 +15,6 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
-use function array_filter;
-use function array_map;
-use function array_values;
-use function json_encode;
-use function preg_match;
-use function str_contains;
-
 /**
  * MCP-over-HTTP endpoint (streamable HTTP, JSON response mode).
  *
@@ -34,7 +27,8 @@ final class McpController
 {
     public function __construct(
         private McpServerFactory $factory,
-    ) {}
+    ) {
+    }
 
     public function __invoke(Request $request): Response
     {
@@ -115,7 +109,7 @@ final class McpController
         }
 
         return new Response(
-            json_encode($response, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)."\n",
+            json_encode($response, \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE)."\n",
             Response::HTTP_OK,
             ['Content-Type' => 'application/json'],
         );

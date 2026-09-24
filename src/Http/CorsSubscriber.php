@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http;
 
+use Override;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\Request;
@@ -11,14 +12,6 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
 use Symfony\Component\HttpKernel\Event\ResponseEvent;
 use Symfony\Component\HttpKernel\KernelEvents;
-
-use function array_filter;
-use function array_map;
-use function explode;
-use function implode;
-use function in_array;
-use function preg_match;
-use function str_starts_with;
 
 /**
  * CORS handling for browser clients (e.g. llama.cpp's web UI).
@@ -71,8 +64,10 @@ final class CorsSubscriber implements EventSubscriberInterface
     public function __construct(
         #[Autowire('%env(enum:App\Http\CrossOriginResourcePolicy:default:cors_resource_policy:CORS_RESOURCE_POLICY)%')]
         private CrossOriginResourcePolicy $resourcePolicy = CrossOriginResourcePolicy::SameSite,
-    ) {}
+    ) {
+    }
 
+    #[Override]
     public static function getSubscribedEvents(): array
     {
         return [
@@ -177,7 +172,7 @@ final class CorsSubscriber implements EventSubscriberInterface
         $existing = (string) $response->headers->get('Vary', '');
         $parts = array_filter(array_map('trim', explode(',', $existing)));
 
-        if (!in_array('Origin', $parts, true)) {
+        if (!\in_array('Origin', $parts, true)) {
             $parts[] = 'Origin';
         }
 

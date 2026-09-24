@@ -8,10 +8,6 @@ use DateTimeImmutable;
 use DateTimeInterface;
 use DateTimeZone;
 
-use function mb_strlen;
-use function mb_strtolower;
-use function mb_strtoupper;
-
 /**
  * Example no-network tool: echoes its input back.
  *

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\ToolRegistry;
 
+use Override;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Reference;
@@ -18,6 +19,7 @@ use Symfony\Component\DependencyInjection\Reference;
  */
 final class ToolRegistryPass implements CompilerPassInterface
 {
+    #[Override]
     public function process(ContainerBuilder $container): void
     {
         $toolsDir = $container->getParameterBag()->resolveValue('%kernel.project_dir%/config/tools');

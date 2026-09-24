@@ -33,7 +33,8 @@ final class McpServerFactory
         private LoggerInterface $invocationLogger,
         private string $serverName,
         private string $serverVersion,
-    ) {}
+    ) {
+    }
 
     public function build(): McpStack
     {

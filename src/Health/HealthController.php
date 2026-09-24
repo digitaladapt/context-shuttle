@@ -20,7 +20,8 @@ final class HealthController
 {
     public function __construct(
         private ToolRegistry $registry,
-    ) {}
+    ) {
+    }
 
     public function health(): JsonResponse
     {

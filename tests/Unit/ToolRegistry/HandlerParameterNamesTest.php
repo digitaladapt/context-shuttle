@@ -9,12 +9,6 @@ use App\ToolRegistry\ToolLoader;
 use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
 
-use function count;
-use function explode;
-use function implode;
-use function sprintf;
-use function str_contains;
-
 /**
  * The MCP dispatcher (php-mcp RegisteredElement::prepareArguments) maps tool
  * arguments to handler parameters by exact name. A YAML parameter named
@@ -32,7 +26,7 @@ final class HandlerParameterNamesTest extends TestCase
     {
         $definitions = (new ToolLoader(__DIR__.'/../../../config/tools'))->load();
 
-        self::assertGreaterThan(0, count($definitions), 'No tools found in config/tools.');
+        self::assertGreaterThan(0, \count($definitions), 'No tools found in config/tools.');
 
         $failures = [];
 
@@ -41,7 +35,7 @@ final class HandlerParameterNamesTest extends TestCase
 
             foreach ($definition->parameters as $paramName => $_def) {
                 if (!isset($handlerParams[$paramName])) {
-                    $failures[] = sprintf(
+                    $failures[] = \sprintf(
                         "Tool '%s': YAML parameter '%s' has no matching handler parameter (handler has: %s).",
                         $definition->name,
                         $paramName,
@@ -60,7 +54,7 @@ final class HandlerParameterNamesTest extends TestCase
     private function handlerParameterNames(ToolDefinition $definition): array
     {
         if (!str_contains($definition->handler, '::')) {
-            self::fail(sprintf("Tool '%s': handler '%s' is not a FQCN::method string.", $definition->name, $definition->handler));
+            self::fail(\sprintf("Tool '%s': handler '%s' is not a FQCN::method string.", $definition->name, $definition->handler));
         }
 
         [$class, $method] = explode('::', $definition->handler, 2);

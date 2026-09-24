@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Mcp;
 
+use Override;
 use PhpMcp\Schema\Content\TextContent;
 use PhpMcp\Schema\Request\CallToolRequest;
 use PhpMcp\Schema\Result\CallToolResult;
@@ -15,12 +16,6 @@ use PhpMcp\Server\Session\SubscriptionManager;
 use PhpMcp\Server\Utils\SchemaValidator;
 use Psr\Log\LoggerInterface;
 use Throwable;
-
-use function hrtime;
-use function implode;
-use function json_encode;
-use function strlen;
-use function substr;
 
 /**
  * Dispatcher decorator that logs every tools/call: who called what, with
@@ -41,6 +36,7 @@ class LoggingDispatcher extends Dispatcher
         parent::__construct($configuration, $registry, $subscriptionManager, $schemaValidator);
     }
 
+    #[Override]
     public function handleToolCall(CallToolRequest $request, Context $context): CallToolResult
     {
         $toolName = $request->name;
@@ -85,7 +81,7 @@ class LoggingDispatcher extends Dispatcher
     private function sanitize(array $arguments): array
     {
         $encoded = json_encode($arguments) ?: '[]';
-        if (strlen($encoded) > 2048) {
+        if (\strlen($encoded) > 2048) {
             return ['_truncated' => substr($encoded, 0, 2048).'…'];
         }
 
@@ -102,7 +98,7 @@ class LoggingDispatcher extends Dispatcher
             $texts[] = ($content instanceof TextContent ? $content->text : (json_encode($content) ?: ''));
         }
         $preview = implode("\n", $texts);
-        if (strlen($preview) > 1024) {
+        if (\strlen($preview) > 1024) {
             $preview = substr($preview, 0, 1024).'…';
         }
 

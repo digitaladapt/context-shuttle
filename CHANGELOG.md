@@ -8,6 +8,25 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- CI now calls the shared reusable workflows instead of carrying its own
+  copies. `.gitea/workflows/{tests,develop,docker,publish}.yaml` went from
+  265 lines of hand-maintained steps to 143 lines of trigger plus `uses:` —
+  the pipeline itself lives in the shared standards repo, so a change there
+  reaches every project that calls it with no PR here. The inlined
+  `tests.yaml` existed because the cross-repo `uses:` form was believed not
+  to work on this instance; it does work, and the original failure was the
+  source repo being unreachable to the runner rather than the syntax.
+- Leaf dev-tool configs re-synced from the shared repo: `phpstan.neon.dist`
+  (level 6 + the high-signal checks, plus an empty `phpstan-baseline.neon`),
+  `.php-cs-fixer.dist.php`, `.editorconfig`, `LICENSE`, and
+  `.ci/conformance.sh` (+ the newly vendored `validate-bake.py`). PHPStan
+  stays clean at the shared level, so the baseline ships empty rather than
+  recording violations.
+- Adopting the shared php-cs-fixer config reformatted 29 of 31 files. This is
+  a formatting change, not a behaviour change: the rules are `@Symfony` +
+  `@Symfony:risky`, and the only non-whitespace edits are native-function
+  calls taking a leading `\` (14 files) and yoda/`self::` idiom. All 61 tests
+  pass after the reformat.
 - Composer package renamed `devgnome/context-shuttle` →
   `digitaladapt/context-shuttle`, matching the GitHub and Docker Hub repos.
 - Public-facing links now use `code.digitaladapt.com/public/context-shuttle`
@@ -39,6 +58,11 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 - `.ci/conformance.sh` + `css-control-size.py` vendored from the shared
   standards repo; the CI conformance step now runs instead of silently
   skipping.
+- `#[Override]` on every method that overrides a parent or interface method
+  (11 sites across `Kernel`, `CorsSubscriber`, `CaptureTransport`,
+  `LoggingDispatcher`, `ToolRegistryPass`, and two test classes), so a
+  renamed parent method fails static analysis instead of silently no longer
+  overriding anything.
 
 ### Fixed
 
@@ -52,6 +76,12 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 - `docker-bake.hcl`: `DOCKERHUB_TARGET` default was misspelled
   `digitaladapt/comtext-shuttle`; corrected to
   `digitaladapt/context-shuttle`.
+- `ToolLoaderTest`: `$tmpDir` was read by `tearDown()` before `setUp()` had
+  assigned it; given a default so a failing `setUp()` cannot surface as an
+  unrelated uninitialised-property error.
+- `CaptureTransport`: dropped a `@phpstan-ignore` that no longer matched
+  anything, and whose comment claimed a `return.type` error the code does not
+  produce.
 
 ## [1.0.0] - 2026-09-20
 
