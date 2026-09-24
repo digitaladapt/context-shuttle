@@ -1,6 +1,6 @@
 # ALERTS — context-shuttle
 
-**Status:** planning (v0.1 draft, revised after review) · supersedes nothing ·
+**Status:** planning (v0.2 draft, revised after two review rounds) · supersedes nothing ·
 sibling docs: `SPEC.md`, `DESIGN_CONSIDERATIONS.md`, `ROADMAP.md`
 
 ## Goal
@@ -9,23 +9,23 @@ Two tool families sharing one delivery abstraction:
 
 1. **One-way alerts** (`send_alert`) — "hey boss, the thing is done",
    with optional link. Ships first.
-2. **Interactive requests** (`request_confirm`, `request_input`,
-   `get_input`) — the LLM asks the human a question through the same
-   provider, the human answers on a web form, and the answer is
+2. **Interactive requests** (`ask_user`, `ask_user_confirm`,
+   `get_user_answer`) — the LLM asks the human a question through the
+   same provider, the human answers on a web form, and the answer is
    retrieved by follow-up:
 
    > "I want your input boss, do we change the CI for all the projects or
    > customize the CI for this one project?"
 
    → notification with a link → boss types a reply on a tiny web page →
-   submit → the answer is fetched via `get_input` (or the harness's own
+   submit → the answer is fetched via `get_user_answer` (or the harness's own
    polling) and handed back to the LLM.
 
 Providers at launch: **ntfy** and **Discord** (webhook). The provider is
 behind an interface so more can follow (email, Slack, Telegram…) without
 touching tool contracts.
 
-## Decisions locked in this review (v0.1)
+## Decisions locked in review (v0.2)
 
 - **Twig for the `/ask` form.** SPEC v1's "no Twig" non-goal was
   predicated on "no user interface"; the form is exactly one page, and
@@ -36,16 +36,28 @@ touching tool contracts.
   the same `actionUrl` mechanism later renders the `/ask/{id}` link, so
   building it once in Phase 0 means Phase 2 adds nothing to the
   providers.
-- **Interactive requests are non-blocking by default.** `request_*`
-  returns an id immediately; `get_input` takes the id and returns
+- **Interactive requests are non-blocking by default.** `ask_user*`
+  returns an id immediately; `get_user_answer` takes the id and returns
   `pending` / `answered` / `expired`. Blocking is an **opt-in**
-  (`wait: true`, bounded by `timeout_seconds`) for clients that want
-  one-shot semantics.
+  (`wait: true`, bounded by `timeout_seconds`) and exists on the
+  free-text tool (`ask_user`) only — `ask_user_confirm` never blocks.
 - **Harness-side polling without LLM intervention.** A lightweight
   status endpoint lets a harness (task-loom) poll for answers itself,
   so its tool queue never blocks on a human and nothing depends on the
   LLM remembering to follow up — or doing so correctly. Non-task-loom
-  clients use `get_input` or `wait: true` as suits them.
+  clients use `get_user_answer` or `wait: true` (on `ask_user`) as
+  suits them.
+- **Deliberately blunt tool names.** Request tools are `ask_user`
+  (free text) and `ask_user_confirm` (yes/no); the fetch tool is
+  `get_user_answer`. The ask ↔ get-answer mirroring is chosen so even
+  small models can tell which side of the coin they are on.
+- **Link trust: show the domain, skip the allowlist (Phase 0).**
+  `send_alert`'s `link` stays unrestricted in v1; instead both
+  providers render the destination **host** (plus a short path where
+  it fits) in the notification's visible text, so the boss can judge a
+  tap before taking it. A domain/prefix allowlist was considered and
+  set aside as brittle (legitimate links are arbitrary; prefixes are
+  defeated by redirectors).
 
 ## Non-goals
 
@@ -72,7 +84,7 @@ touching tool contracts.
 | `body` | string | – | markdown-ish detail, ≤ 4 000 chars |
 | `priority` | integer | – | 1–5, default 3 (see Priority model) |
 | `tags` | array[string] | – | ntfy tags / discord topic hints; ≤ 8 |
-| `link` | string | – | http(s) URL rendered as the notification's click action (ntfy `Click`, Discord embed link) |
+| `link` | string | – | http(s) URL rendered as the notification's click action (ntfy `Click`, Discord embed link); destination host shown in the visible text |
 | `link_label` | string | – | display label for the link, default "Open" |
 
 Returns a delivery receipt: provider name, provider message id (when
@@ -84,35 +96,43 @@ Handler: `App\Tool\Alerts\AlertTool::sendAlert` as
 `config/tools/send_alert.yaml`, same registration dance as
 `get_transactions` (public service, clear "not configured" failure).
 
-### `request_confirm` (Phase 2)
+### `ask_user` (Phase 2)
 
-| Parameter | Type | Notes |
-|---|---|---|
-| `question` | string | the yes/no question, shown verbatim |
-| `confirm_label` / `dismiss_label` | string | button labels, defaults "Yes"/"No" |
-| `timeout_seconds` | integer | max wait, default 600, max 3600 |
-| `wait` | boolean | default `false`; `true` blocks the call until answered/expired |
-
-Non-blocking result: `{id, status: "pending", expires_at}`.
-`wait: true` result: `{status: "answered", answer: true|false}` or
-`{status: "expired"}`.
-
-### `request_input` (Phase 2)
+The free-text side. Name reads on its own: "the LLM asks the user".
 
 | Parameter | Type | Notes |
 |---|---|---|
 | `question` | string | shown verbatim on the form |
 | `placeholder` | string | textarea hint, optional |
-| `timeout_seconds` | integer | as above |
-| `wait` | boolean | as above |
+| `timeout_seconds` | integer | max wait, default 600, max 3600 |
+| `wait` | boolean | default `false`; `true` blocks until answered/expired (the only tool with `wait` — see Interaction model) |
 
-Same result shapes; `answer` is the reply text.
+Non-blocking result: `{id, status: "pending", expires_at}`.
+`wait: true` result: `{status: "answered", answer: "…"}` or
+`{status: "expired"}`.
 
-### `get_input` (Phase 2)
+### `ask_user_confirm` (Phase 2)
+
+The yes/no side — same family, `confirm` suffix, no free text.
 
 | Parameter | Type | Notes |
 |---|---|---|
-| `id` | string | the identifier returned by `request_*` |
+| `question` | string | the yes/no question, shown verbatim |
+| `confirm_label` / `dismiss_label` | string | button labels, defaults "Yes"/"No" |
+| `timeout_seconds` | integer | as above |
+| `wait` | – | **not offered** — a confirmation is quick by nature; the harness (or `get_user_answer`) handles the wait. Keeps one blocking tool, not two. |
+
+Non-blocking result only: `{id, status: "pending", expires_at}`;
+the answer arrives as `answer: true|false` via `get_user_answer`.
+
+### `get_user_answer` (Phase 2)
+
+The other side of the coin: reads as "get the user's answer", so the
+ask ↔ get-answer pairing is inferable without documentation.
+
+| Parameter | Type | Notes |
+|---|---|---|
+| `id` | string | the identifier returned by `ask_user` / `ask_user_confirm` |
 
 Returns `{status: "pending"|"answered"|"expired", answer?, question?,
 answered_at?}`. `expired` and `pending` are **normal results**, not
@@ -182,8 +202,13 @@ Five levels, modelled after ntfy's (the richer of the two):
 - Publish via `POST {NTFY_URL}/{topic}` with `Title`, `Priority`, `Tags`
   headers; JSON body publish when we need ntfy extras — `click` for the
   link (opens in the ntfy app's in-app browser on mobile).
+- Link rendering: `click` carries the URL; the **visible body** gets a
+  trailing line like `→ example.com/run/42` (host + path, shortened),
+  because the click action itself is invisible until tapped. Keep it
+  in the message body, not the title — titles truncate first.
 - Interactive (Phase 2): the `/ask/{id}` URL rides the same `click`
-  field. Nothing new to invent.
+  field and gets the same visible-host treatment (host will be the
+  shuttle's own hostname — expected and fine). Nothing new to invent.
 
 ### Discord
 
@@ -192,16 +217,20 @@ Five levels, modelled after ntfy's (the richer of the two):
   colour-by-priority, footer with tool name, link as the embed URL).
   Tags → embed fields or `[tag]` title prefixes; decide during
   implementation, keep it plain.
+- Link rendering: the embed URL powers the click-through, and the
+  embed body (or a field) gets the same `→ host/path` visible line as
+  ntfy, so the destination is readable before tapping.
 - `allowed_mentions: {users: [...]}` as above. Suppress notifications
   below priority 5 entirely by not mentioning.
-- Interactive (Phase 2): the `/ask/{id}` link is the embed URL —
-  webhooks cannot create real buttons (that's Phase 3 territory).
+- Interactive (Phase 2): the `/ask/{id}` link is the embed URL, with
+  the same visible-host line — webhooks cannot create real buttons
+  (that's Phase 3 territory).
 
 ## Interactive requests (Phase 2) — the interesting part
 
 ### Interaction model: non-blocking by default
 
-The instinct is to make `request_input` block until the human answers
+The instinct is to make `ask_user` block until the human answers
 (open-webui's `ask_user` pattern). Two problems with making that the
 *only* mode:
 
@@ -219,16 +248,16 @@ keep the simpler options.
 
 | Pattern | Verdict |
 |---|---|
-| Non-blocking `request_*` → id → `get_input` follow-up | ✅ **Default.** Works for any MCP client; the LLM (or the harness, on the client's behalf) fetches the answer. |
+| Non-blocking `ask_user*` → id → `get_user_answer` follow-up | ✅ **Default.** Works for any MCP client; the LLM (or the harness, on the client's behalf) fetches the answer. |
 | Harness polls the status endpoint directly | ✅ **Primary for task-loom.** No LLM involvement, no blocked tool queue, no reliance on model memory. |
-| Blocking with TTL (open-webui `ask_user`) | ✅ **Opt-in** (`wait: true`) for one-shot clients and scripts. Same tool, bounded by `timeout_seconds`. |
+| Blocking with TTL | ✅ **Opt-in** (`wait: true` on `ask_user` **only**) for one-shot clients and scripts. One blocking tool, not two — a confirm blocks nothing by design. |
 | MCP elicitation (server→client request) | ❌ A *client* capability we can't assume — and we want the boss on their phone, not whoever is at the MCP client. |
 | Inbound callback/webhook on answer | 🕐 Deferred: needs inbound reachability and per-request routing; polling covers v1. Revisit if poll volume matters. |
 
 ### Flow (non-blocking, harness-polled)
 
 ```
-LLM → request_input(question)
+LLM → ask_user(question)
         │
         ├─ PendingRequest stored (id, TTL)
         ├─ OutboundAlert{actionUrl: /ask/{id}} → provider → boss's phone
@@ -240,15 +269,16 @@ boss opens /ask/{id}, types, submits ┘
   store.status = answered, reply saved
         │
         ▼
-task-loom polls GET /inputs/{id}  (or: LLM calls get_input)
+task-loom polls GET /inputs/{id}  (or: LLM calls get_user_answer)
         │
         ▼
 answer fed back into the conversation → LLM proceeds
 ```
 
-With `wait: true`, the third step instead blocks inside the handler
-(polling the store, ≤ `timeout_seconds`) and returns the final answer
-as the tool result — the open-webui shape, for clients that want it.
+With `wait: true` (on `ask_user` only), the third step instead blocks
+inside the handler (polling the store, ≤ `timeout_seconds`) and
+returns the final answer as the tool result — the open-webui shape,
+for clients that want it.
 
 ### Status endpoint (harness surface)
 
@@ -257,7 +287,7 @@ as the tool result — the open-webui shape, for clients that want it.
   pipeline**: a harness polling every few seconds must not flood the
   `mcp_invocation` log (a 5-second cadence over a 10-minute TTL is 120
   log lines per request). Tool-grade interactions go through
-  `get_input`; machine-grade polling goes here.
+  `get_user_answer`; machine-grade polling goes here.
 - Same id-as-capability model as the form: 128 random bits,
   single-use, expires with the request. No separate auth in v1; the
   form route and this endpoint are first in scope when the ROADMAP
@@ -287,37 +317,40 @@ as the tool result — the open-webui shape, for clients that want it.
 
 ## Open questions
 
-1. **`wait` semantics.** Default `false` per the model above — confirm.
-   Should `wait: true` be offered on both `request_confirm` and
-   `request_input`, or is one-shot blocking really only a
-   `request_input` use case?
-2. **Long-poll on the status endpoint.** `GET /inputs/{id}?wait=30`
+1. **Long-poll on the status endpoint.** `GET /inputs/{id}?wait=30`
    (server holds up to 30 s until status changes) would cut poll
    traffic ~an order of magnitude vs short polling. Nice-to-have or
    YAGNI for v1?
-3. **Link trust.** `send_alert`'s `link` lets the LLM put any URL in
-   front of the boss, who trusts notifications. Options: unrestricted
-   (v1, simplest), a configurable allowlist (`ALERT_LINK_ALLOWLIST`,
-   prefix match), or same-host-only default with an env escape hatch.
-   Lean allowlist-by-default; decide at Phase 0 implementation.
-4. **Priority floor for interactive requests.** Floor at 4 (mention
+2. **Priority floor for interactive requests.** Floor at 4 (mention
    the boss) since the request needs a human act? Or default 3 and let
    the LLM raise it?
-5. **Provider failure during Phase 2.** If the notification can't be
+3. **Provider failure during Phase 2.** If the notification can't be
    delivered, the handler must fail fast (isError, no pending request
    created) rather than mint an id nobody will ever see. Agreed in
    principle; wording of the error to be settled in tests.
-6. **`get_input` naming.** `get_input` vs `get_reply` vs
-   `check_input` — `get_input` pairs naturally with `request_input`,
-   but "input" reads oddly for `request_confirm` answers.
-7. **Fan-out / multiple channels.** One provider per deployment for
+4. **Fan-out / multiple channels.** One provider per deployment for
    now; is "send to both ntfy and discord" wanted early enough to
    design the env shape now (`ALERT_PROVIDER=ntfy` scalar vs a list)?
+5. **Visible-link format.** Proposed `→ host/path` (host always, path
+   truncated to fit). Exact separator/truncation rules to settle when
+   implementing the providers — one shared formatter, so ntfy and
+   Discord render identically and tests can pin the format in one
+   place.
 
-Resolved this round: Twig (yes), link in Phase 0 (yes), blocking vs
-non-blocking (non-blocking default, blocking opt-in), REST blocking
-(moot — non-blocking is the default REST shape too), one-vs-two
-interactive tools (two, plus `get_input`).
+Resolved in review:
+
+- Twig (yes) — the v0.1 open question.
+- Link in Phase 0 (yes).
+- Blocking vs non-blocking: non-blocking default; `wait: true` opt-in
+  on `ask_user` **only** (v0.2).
+- REST blocking: moot — non-blocking is the default REST shape too.
+- One-vs-two interactive tools: two, plus the fetch tool (v0.1).
+- Tool naming: `ask_user`, `ask_user_confirm`, `get_user_answer` —
+  maximum legibility for small models (v0.2).
+- Link trust: no allowlist in Phase 0; visible destination host instead
+  (v0.2). Allowlist remains a possible future knob if the threat model
+  changes — it is not required for the current one (single trusted
+  boss, links are for the boss's own eyeballs).
 
 ## Sequencing
 
@@ -330,10 +363,10 @@ interactive tools (two, plus `get_input`).
   cache, `/ask` routes + Twig form, `GET /inputs/{id}` status
   endpoint, single-use semantics, tested without any provider
   (direct HTTP against form and status endpoint).
-- **Phase 2 — `request_confirm`, `request_input`, `get_input`**:
+- **Phase 2 — `ask_user`, `ask_user_confirm`, `get_user_answer`**:
   non-blocking handlers, `/ask/{id}` link through the existing
-  `actionUrl` path, `wait: true` opt-in blocking, end-to-end test
-  with a fake provider.
+  `actionUrl` path, `wait: true` opt-in blocking on `ask_user` only,
+  end-to-end test with a fake provider.
 - **Phase 3 (contingent)** — provider-native interaction (Discord
   buttons/components via a bot instead of a webhook) *behind the same
   tool contract*, and/or inbound callbacks, only if the web form and
@@ -346,13 +379,14 @@ handlers plus a link render.
 ## Testing strategy
 
 - Unit: providers against `MockHttpClient` (assert headers, priority
-  mapping, click/embed-URL link rendering, `allowed_mentions`
-  suppression — the @everyone guard is a security-ish property, pin it
-  with a test); `Priority` mapping table; `PendingRequest` lifecycle.
+  mapping, click/embed-URL link rendering, visible-host line, and
+  `allowed_mentions` suppression — the @everyone guard is a
+  security-ish property, pin it with a test); `Priority` mapping
+  table; `PendingRequest` lifecycle.
 - Integration: unconfigured-tool friendly error (mirror the
   `get_transactions` test); `/ask/{id}` GET/POST single-use flow via
   `WebTestCase`; `GET /inputs/{id}` status transitions (pending →
-  answered, pending → expired by TTL); full `request_input` round-trip
+  answered, pending → expired by TTL); full `ask_user` round-trip
   with a scripted fake provider (no real network; fake answers
   immediately; a separate short-TTL test exercises expiry, and a
   short-`timeout_seconds` test exercises `wait: true` both ways).
