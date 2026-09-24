@@ -1,8 +1,8 @@
 # CALENDARS — context-shuttle
 
-**Status:** planning (v0.2 draft, revised after review) · sibling docs:
-`SPEC.md`, `DESIGN_CONSIDERATIONS.md`, `ROADMAP.md` · supersedes the
-v0.1 draft
+**Status:** planning (v0.3 draft, revised after second review) · sibling
+docs: `SPEC.md`, `DESIGN_CONSIDERATIONS.md`, `ROADMAP.md` · supersedes the
+v0.1 and v0.2 drafts
 
 ## Goal
 
@@ -13,7 +13,18 @@ the deployment's timezone, so a caller never has to know what an offset is.
 
 Scope of **this document**: the read path — `calendar_list_events`,
 `calendar_get_event`, `calendar_list_tasks`, `calendar_get_task`. CalDAV
-writes come later, behind the same contracts.
+writes come later, behind the same contracts. Of the two sources, **only
+CalDAV is built in Phase 1**; ICS follows in Phase 3 behind the same
+abstraction, and tasks in Phase 2.
+
+**ICS is deferred to Phase 3** (review decision) — CalDAV only until the
+read path is proven. It is still designed for here, because the interesting
+part is not how to fetch a feed, it is the constraint it puts on the tool
+surface: **when ICS arrives it must be indistinguishable from a read-only
+CalDAV calendar.** A caller should never learn that the deployment has one
+data source rather than another, so nothing provider-shaped may appear in
+the output. `readonly` is the only signal that will differ, which is why it
+exists from Phase 1 (see `readonly`, below).
 
 Non-goals for v1:
 
@@ -25,8 +36,18 @@ Non-goals for v1:
 - **No OAuth.** Basic auth only (review decision). Google's CalDAV
   endpoint dropped basic auth, so Google is out of scope until an OAuth
   path exists — say so in the README rather than half-supporting it.
-- **No multi-account.** One CalDAV server and one ICS source per
-  deployment, like the other tools here.
+- **No multi-account.** One CalDAV server per deployment, like the other
+  tools here.
+- **No `file://` ICS sources** (review decision). `symfony/http-client`
+  refuses the scheme (finding 13), and supporting it would mean a second
+  fetch path plus a second test idiom for a case that is rare, awkward in a
+  container, and has no `ETag`/`Last-Modified` to be clever with. ICS is
+  `http(s)` or nothing; **if a feed is not reachable over HTTP it is not
+  supported**, rather than half-supported through a parallel code path.
+- **No provider vocabulary in the tool surface.** No `source`, `provider`,
+  or `kind` field, and no "CalDAV" or "ICS" in a description. The provider
+  is an implementation detail; exposing it would invite a caller to branch
+  on it, which is exactly the coupling that makes ICS expensive to add.
 
 ## What drove this design
 
@@ -49,8 +70,9 @@ documentation. The ones that actually changed the design are marked ⚠️.
 | 10 | Calendars are discoverable only via `PROPFIND` + `resourcetype` containing `<C:calendar/>`; `displayname` returned the *path* on this server. | Discover by property, not name. `href` is the stable identifier. |
 | 11 | `calendar-multiget` (batch fetch by href) works: 2 hrefs → 2 responses. | `calendar_get_event` uses it rather than listing and filtering. |
 | 12 | VTODO filtering behaves identically with and without `<time-range>`. | Cannot assume server-side VTODO date filtering; filter client-side. |
-| 13 | ⚠️ `symfony/http-client` **refuses `file://`**: `Unsupported scheme in "file:///…": "http" or "https" expected`. | ICS sources need a fetch abstraction with a plain-filesystem path, not just a different URL. |
+| 13 | `symfony/http-client` **refuses `file://`**: `Unsupported scheme in "file:///…": "http" or "https" expected`. | ICS is `http(s)`-only. No filesystem fetch path, no fetch seam, no second test idiom. |
 | 14 | ⚠️ Converting an all-day `DATE` through a timezone **shifts the day**: `2026-11-01` renders as `2026-10-31` in `America/New_York`. | `DATE` values are never timezone-converted, anywhere. |
+| 15 | ⚠️ A bare `DATE` is **also a valid instant**: `new DateTimeImmutable('2026-11-01')` succeeds and yields `2026-11-01T00:00:00+00:00`. | Composite-id parsing must be regex-first with the date case tested before the instant case — a "does the tail parse?" rule silently misreads every all-day occurrence as midnight, then shifts its day (finding 14). See Composite ids. |
 
 ## Authentication
 
@@ -141,24 +163,51 @@ occurrence carries the same `UID`. Both listing and fetching need to address
 one occurrence.
 
 The format is **`{UID}::Occurrence`** (review decision), where `Occurrence`
-is the occurrence's start as an ISO 8601 instant in `TZ`:
+is the occurrence's start **in UTC** — `2026-10-09T15:00:00Z` for a timed
+event, `2026-11-01` for an all-day one:
 
 ```
-evt-standup@test::2026-10-09T15:00:00-04:00
+evt-standup@test::2026-10-09T15:00:00Z    (timed, minute at 15:00 UTC)
+holiday@test::2026-11-01                  (all-day, a date not an instant)
 ```
 
-The parsing rule is what makes it safe: **split on the *last* `::`, and
-accept the split only if the tail parses as an ISO 8601 instant.** A UID
-that merely contains `::` still resolves correctly, because its tail will not
-parse as an instant and the whole string is then treated as a plain UID:
+UTC, not `TZ`, is deliberate (review decision): the id names **a point in
+time**, and that must not move when an operator changes `TZ`. It also makes
+ids stable if one is ever stored by a caller, and portable between
+deployments. The cost is that `id` and `start` are *intentionally different
+strings* for the same occurrence (`…T15:00:00Z` vs `…T11:00:00-04:00`); a
+caller must compare them as instants or not at all, never as text. That is
+worth stating in the tool description, because it looks like a bug.
+
+**The parse rule is regex-first, and the date case comes first** (finding
+15). Split on the *last* `::`; if there is none, the whole string is a UID.
+Otherwise classify the tail:
+
+| Tail matches | Kind |
+|---|---|
+| `^\d{4}-\d{2}-\d{2}$` | all-day occurrence — **a date, never an instant** |
+| `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z\|[+-]\d{2}:\d{2})$` | timed occurrence |
+| anything else | not an occurrence — the whole string is a plain UID |
+
+The order matters: `DateTimeImmutable` accepts `2026-11-01` as
+`2026-11-01T00:00:00+00:00`, so a constructor-based "does the tail parse?"
+check would treat every all-day occurrence as a midnight instant and the
+reader would then shift its day under a non-UTC `TZ` (finding 14). The
+timed form also **requires** an explicit `Z` or offset, so a floating
+local time can never be mistaken for an instant.
+
+This keeps a UID that merely contains `::` working, because its tail matches
+neither pattern:
 
 | Input | Resolves to |
 |---|---|
-| `evt-standup@test::2026-10-09T15:00:00Z` | UID `evt-standup@test`, occurrence `2026-10-09T15:00:00Z` |
+| `evt-standup@test::2026-10-09T15:00:00Z` | UID `evt-standup@test`, occurrence 2026-10-09T15:00Z |
+| `holiday@test::2026-11-01` | UID `holiday@test`, all-day occurrence 2026-11-01 |
 | `evt-standup@test` | UID, no occurrence |
-| `weird::uid::2026-10-09T15:00:00Z` | UID `weird::uid`, occurrence `2026-10-09T15:00:00Z` |
+| `weird::uid::2026-10-09T15:00:00Z` | UID `weird::uid`, occurrence 2026-10-09T15:00Z |
 | `weird::uid@test` | UID `weird::uid@test` |
 | `a@b::not-a-date` | UID `a@b::not-a-date` |
+| `a@b::2026-11-01T00:00:00` | UID `a@b::2026-11-01T00:00:00` — floating, so not an instant |
 
 Behaviour:
 
@@ -178,11 +227,10 @@ Expansion is client-side and bounded (finding 2):
 
 - Fetch with `<time-range>`, **without** `<expand>`.
 - Expand locally with `sabre/vobject` against the payload's own `VTIMEZONE`.
-- `limit` defaults to 100 (max 500); hitting it sets `truncated: true` and
-  returns `next_from`, so paging is predictable and explicit. An unbounded
-  daily series is otherwise thousands of rows in a context window.
 - The expansion window is clamped (366 days max) so a pathological `RRULE`
   cannot be used to burn the process.
+- An unbounded daily series would otherwise be thousands of rows in a
+  context window, which is what `limit` and the page cursor are for (below).
 
 ## Tool surface
 
@@ -202,17 +250,69 @@ says it must be property-driven — it is simply not its own endpoint.
 | `to` | string | ✅ | `YYYY-MM-DD`, inclusive, in `TZ` |
 | `calendar` | string | – | restrict to one calendar by `href` or display name; default all |
 | `search` | string | – | case-insensitive substring over summary/description/location |
-| `limit` | integer | – | 1–500, default 100 |
+| `limit` | integer | – | 1–200, default **50** |
+| `cursor` | string | – | opaque token from a previous call's `next_cursor`; omit for the first page |
 
-Returns `{events: [...], count, truncated, next_from, timezone, errors?}`.
-A bare array would leave `truncated` and `errors` nowhere to live.
+Returns `{events: [...], count, has_more, next_cursor?, timezone, errors?}`.
+A bare array would leave `has_more` and `errors` nowhere to live.
 
 Each event: `id`, `uid`, `recurrence_id`, `summary`, `description`, `start`,
 `end`, `all_day`, `end_exclusive`, `location`, `categories`, `status`,
-`calendar` (`{name, href, readonly}`), `editable`.
+`calendar`, `readonly`.
 
 Ordering is by start instant, then summary, so the order is stable across
-calls — a non-deterministic order makes a model's narration of a day wrong.
+calls — a non-deterministic order makes a model's narration of a day wrong,
+and it is also what makes a cursor meaningful.
+
+### Paging: an opaque cursor ⚠️
+
+**A page cursor, not a date** (review decision), because that is what the
+other tools in this repo already speak: `get_transactions` and
+`get_health_logs` both expose `limit`/`page` and return pagination metadata
+from the upstream API, and the MCP protocol itself uses `cursor` /
+`nextCursor` for list methods. An ISO-date cursor would have been a third
+dialect — transparent, but asking a caller to re-derive a `from` on each
+loop, and inconsistent with everything else here.
+
+- The cursor is **opaque**: base64url of a small JSON payload carrying the
+  last row's `(start instant, uid, id)`. Opaque means the caller echoes it
+  back rather than constructing one, so the encoding can change later
+  without breaking anything.
+- `has_more: true` plus `next_cursor` means "there is another page"; pass
+  the cursor back verbatim. No cursor in the response means the listing is
+  complete.
+- Because the cursor is anchored to the **last row's instant** rather than
+  a row count, it stays correct when the underlying data changes between
+  pages: an event inserted earlier in the range cannot cause a later page to
+  skip or repeat rows the way an offset would.
+- An unparseable cursor is a normal tool error naming the parameter, not a
+  silent restart from the beginning.
+- A cursor carries no credentials and no server state; it is just a
+  position, so nothing needs to be stored or expired.
+
+**`limit` defaults to 50** (review decision): large enough for a week of
+events, small enough not to overwhelm a small model. Max 200, matching
+`get_health_logs`, rather than the 500 of the v0.2 draft.
+
+### `readonly` ⚠️
+
+The event's `calendar` object carries `readonly` (review decision), and it
+is present **from Phase 1** even though nothing consumes it yet.
+
+- The value is already known: discovery reads each calendar's privileges
+  (finding 10), and a CalDAV calendar announces read-only via
+  `<C:read-only/>` in its `current-user-privilege-set` or by omitting
+  `write`/`write-content`.
+- It is the **only field that will distinguish an ICS calendar from a CalDAV
+  one** when Phase 3 lands, and the only honest signal a caller gets that
+  "edit this" is not an option — so it earns its place before the write
+  tools exist rather than being retrofitted onto a shipped response shape.
+- It is per-**calendar**, not per-event, which is why it lives inside
+  `calendar` rather than beside `status`: a recurring series with one
+  read-only override is still one calendar whose writability is uniform.
+- The v0.2 draft carried a separate per-event `editable` field. That is
+dropped: it duplicated `readonly` with no second source of truth, and two
+fields that must always agree is a bug waiting to happen.
 
 ### `calendar_get_event`
 
@@ -229,13 +329,14 @@ found → a normal tool error naming the id.
 
 VTODO, same shape with `summary`, `description`, `due` (nullable, in `TZ`,
 date-only when the task is date-only), `status`, `percent_complete`,
-`priority`, `completed_at`, `categories`, `calendar`.
+`priority`, `completed_at`, `categories`, `calendar`, `readonly`.
 
 - **Open tasks by default** (review decision): `include_completed` defaults
   to `false` and no date range is required, because "what's outstanding?" is
   the dominant question. A caller reconstructing history passes
   `include_completed: true` plus `from`/`to` on `due` and accepts the extra
   step.
+- Paging is the same opaque cursor (`limit` / `cursor` / `next_cursor`).
 - Filtering is client-side after the fetch (finding 12).
 
 ## Errors are a sentence, detail is a log ⚠️
@@ -272,7 +373,7 @@ already makes for routing REST through the MCP pipeline.
 ```php
 interface CalendarProvider
 {
-    /** Non-display identifier: 'caldav', 'ics'. */
+    /** Non-display identifier used for logging only: 'caldav', 'ics'. */
     public function name(): string;
 
     /** @return list<CalendarInfo> */
@@ -287,6 +388,11 @@ interface CalendarProvider
 }
 ```
 
+`name()` is **for logs, not output** — it exists so an operator reading
+`mcp_invocation` can tell which side a problem came from, and it must never
+reach a tool result. That is the mechanism behind "ICS appears no different
+from a read-only CalDAV calendar".
+
 Expansion, normalization and DTO shaping sit **above** the provider in a
 shared `CalendarReader`/`EventMapper`, so the timezone rule is implemented
 once.
@@ -294,24 +400,35 @@ once.
 `ComponentType` is an enum (`VEVENT`/`VTODO`) rather than a string, making
 the distinction a type error rather than a runtime surprise.
 
-### ICS is a URL, and it is made of fresh air ⚠️
+### ICS: deferred, and indistinguishable when it lands
 
-An ICS source is **a URL, and may be a `file:///path/to/file.ics`** (review
-decision). Two consequences:
+An ICS source is **an `http(s)` URL** (review decision after finding 13: no
+`file://`, so no fetch seam, no filesystem path, no second test idiom). Two
+consequences that survive from the v0.2 draft:
 
 - **It must be assumed to change at any moment**, so it is fetched on every
   call and never cached or memoized. There is no "refresh" concept to
-  expose; freshness is the default.
-- **`file://` needs its own fetch path.** `symfony/http-client` rejects the
-  scheme outright (finding 13), so the ICS provider takes a small
-  `SourceFetcher` seam with two implementations — `http(s)` via the existing
-  client, local via the filesystem — rather than pretending one client
-  covers both. A local file also has no `ETag`/`Last-Modified` to be clever
-  with, which is another reason not to try.
+  expose; freshness is the default. A feed has no `ETag`/`Last-Modified` to
+  lean on either.
+- **It is read-only, and that is the whole difference.** One synthetic
+  `CalendarInfo` (named by `ICS_NAME`), `readonly: true`, everything else
+  identical to a CalDAV calendar's events. No `source` field, no provider
+  name in the output.
 
-Because an ICS feed is a single flat calendar with no discovery, it reports
-one synthetic `CalendarInfo` (named by `ICS_NAME`, defaulting to something
-stable like `ics`) and ignores the `calendar` filter.
+**Deferred to Phase 3** (review decision): CalDAV only until the read path is
+proven. Designing it now anyway is the point — the constraint above is a
+constraint on the *tool surface*, and it is cheap to honour while the surface
+is still being designed and expensive to retrofit once a caller has learned
+to branch on a provider field.
+
+It is also why there is no `SourceFetcher` seam in this design. The v0.2
+draft introduced one to abstract `http(s)` and `file://`; without `file://`
+there is nothing to abstract — an ICS URL is just a `GET` through the same
+`symfony/http-client` every other tool already uses, so the ICS provider
+becomes a small class over the existing client.
+
+Because an ICS feed is a single flat calendar with no discovery, it ignores
+the `calendar` filter.
 
 ## Transport decision: Symfony HttpClient + sabre/vobject
 
@@ -373,7 +490,7 @@ uncached — it is the thing whose freshness the caller is asking about, and
 | `CALDAV_USERNAME` | *(empty)* | username |
 | `CALDAV_PASSWORD` | *(empty)* | password / app password (secrets vault supported) |
 | `CALDAV_CALENDARS` | *(empty)* | optional comma-separated `href`s to expose; empty ⇒ all discovered |
-| `ICS_URL` | *(empty)* | ICS feed. `http(s)://` **or `file:///path/to/file.ics`**. Empty ⇒ ICS not configured. |
+| `ICS_URL` | *(empty)* | ICS feed URL. **`http(s)://` only** (`file://` is not supported). Empty ⇒ ICS not configured. |
 | `ICS_NAME` | `ics` | display name for the synthetic ICS calendar |
 | `TZ` | PHP default (`UTC`) | **the** timezone: all output, and how `from`/`to` are read |
 
@@ -387,10 +504,15 @@ env vars. (`context-shuttle` booting with no calendar configured stays
 valid — the alerting prior art is stricter, but here the tools are simply
 not usable.)
 
+Only CalDAV is wired up in Phase 1, so during Phase 1–2 the `ICS_*` rows are
+documentation of intent rather than live configuration. A non-`http(s)`
+`ICS_URL` (in particular `file://`) is rejected with a message that says why,
+rather than being silently ignored.
+
 ## Tool description text
 
 The YAML `description` is what a model reads first, so it must carry what a
-caller cannot infer:
+caller cannot infer. Nothing in it may name a data source.
 
 - recurrence means **multiple results per event**, and `id` (not `uid`) is
   the handle for one occurrence;
@@ -398,8 +520,11 @@ caller cannot infer:
   timezone;
 - **all timestamps are already in that timezone** — nothing needs
   converting, and no offset reasoning is required;
+- `id` is a UTC instant (or a date, for all-day events) and is **not**
+  textually equal to `start`; compare them as times if at all;
 - all-day events are dates with no time component;
-- `truncated: true` means narrow the range rather than assume completeness;
+- pass `cursor` back verbatim to page; `has_more: false` means the listing is
+  complete;
 - a non-empty `errors` string means some events were malformed or
   unschedulable — the rest are still valid.
 
@@ -413,7 +538,19 @@ fixtures that matter here. Every finding becomes a test:
   instants; occurrences share `uid` but have distinct composite `id`s; a
   moved override reports its actual start with the original
   `recurrence_id`; composite-id parsing covers every row of the table above,
-  including a UID containing `::`.
+  including a UID containing `::` and a floating local time.
+- **Id stability**: the same occurrence has the same `id` under two
+  different values of `TZ`, while `start` differs — asserting that the two
+  are deliberately different strings and that the underlying instant is
+  identical.
+- **All-day id**: an all-day occurrence's `…::2026-11-01` id parses back as
+  a **date**, not as midnight on the 31st or the 1st in some zone
+  (finding 15) — the regression test for the trap above.
+- **Paging**: a range longer than one page returns `has_more: true` and a
+  `next_cursor`; following it yields the next page with no overlap and no
+  gap; walking to exhaustion returns every event exactly once; an event
+  added *before* the cursor between pages causes neither a skip nor a
+  duplicate; a malformed `cursor` is a clear error, not a silent restart.
 - **Timezone**: three sources expressing one instant (UTC, named `TZID`,
   fixed-offset `TZID`) normalize to the same output under a fixed `TZ`;
   changing `TZ` changes the rendering but never the instant; a
@@ -427,9 +564,15 @@ fixtures that matter here. Every finding becomes a test:
   `errors: "There were 1 malformed events"` (not a 422); a transport error
   retries once then reports cleanly; `401`/`403` name the env var and never
   leak the password.
-- **ICS**: an `http(s)` fetch through `MockHttpClient`; a `file://` fetch
-  through the filesystem path (finding 13); a changed file is reflected on
-  the next call, proving nothing is cached.
+- **`readonly`**: a calendar advertising read-only privileges reports
+  `readonly: true` and a writable one `false`, through the event's
+  `calendar` object.
+- **No provider leakage**: a test asserting that no tool result and no YAML
+  description contains `caldav`, `ics`, `source`, or `provider` — so Phase 3
+  cannot introduce a provider-shaped field by accident.
+- **ICS** *(Phase 3)*: an `http(s)` fetch through `MockHttpClient`; a
+  changed feed is reflected on the next call, proving nothing is cached; its
+  events are shaped identically to a read-only CalDAV calendar's.
 - **Discovery**: calendars found by `resourcetype`, not display name;
   `readonly` from the privilege set; `CALDAV_CALENDARS` filtering;
   membership reported as event metadata.
@@ -445,48 +588,65 @@ so CI stays hermetic.
 
 - **Phase 1 — CalDAV events.** `sabre/vobject` + `CalDavClient`
   (discovery, `calendar-query`, `calendar-multiget`), the timezone rule,
-  expansion, composite ids, `calendar_list_events`, `calendar_get_event`,
-  env wiring, tests. This is "start with just reading just CalDAV events",
-  with the hard semantics proven before anything is built on them.
+  expansion, composite ids, page cursor, `calendar_list_events`,
+  `calendar_get_event`, env wiring, tests. This is "start with just reading
+  just CalDAV events", with the hard semantics proven before anything is
+  built on them.
 - **Phase 2 — tasks.** `VTODO` through the same contract and mapper;
   `calendar_list_tasks`, `calendar_get_task`.
-- **Phase 3 — ICS.** The `SourceFetcher` seam (http + `file://`), one
-  synthetic calendar, dedupe by `(uid, start)` when CalDAV is also
-  configured. Confirms the abstraction before writes put pressure on it.
+- **Phase 3 — ICS.** A small `http(s)` provider over the **existing**
+  client, one synthetic `readonly` calendar, dedupe by `(uid, start)` when
+  CalDAV is also configured. The acceptance criterion is not that it
+  fetches, it is that its output is **indistinguishable from a read-only
+  CalDAV calendar** — one `readonly` flag and nothing else.
 - **Phase 4 (contingent) — CalDAV writes.** Events then tasks, on a single
   configured editable calendar, with `If-Match` optimistic concurrency from
+  day one: "update the meeting I just showed you" is the real use case, and
+  last-write-wins corrupts a shared calendar. `readonly` is how a caller
+  knows which calendars this is even possible on.
   day one: "update the meeting I just showed you" is the real use case, and
   last-write-wins corrupts a shared calendar.
 
 ## Open questions
 
-1. **`truncated` + `next_from` versus a `page` cursor.** Paging is settled;
-   the shape is not. An ISO date cursor is transparent and lets a caller
-   narrow a range themselves, but a looping caller resends a different
-   `from` each time. A cursor token is less inspectable but unambiguous.
-2. **Default `limit` of 100.** Right for "what's on this week"; low for
-   "when is my next holiday", which a caller can now hit `truncated` on.
-   Worth revisiting once real queries exist.
-3. **`readonly` on an event.** Discovery knows it, so it is cheap to
-   include, but with no writes in v1 nothing consumes it. Keep it as
-   forward-compatibility, or drop it until Phase 4?
-4. **Composite id when `TZ` changes.** The occurrence half is rendered in
-   `TZ`, so the same occurrence has a different `id` after a `TZ` change.
-   That is harmless when `TZ` is stable per deployment (its intended use),
-   but it makes ids non-portable across deployments, and would break a
-   stored id after an operator change. Store the occurrence in UTC instead,
-   and accept an offset that does not match the displayed time?
-5. **Two sources at once.** Should CalDAV and ICS be usable together in v1
-   (merged listing, dedupe by `(uid, start)`) or is one-or-the-other
-   simpler to reason about until Phase 3 is real?
+1. **When exactly may a series be returned unexpanded?** A non-recurring
+event needs no expansion, and a large series inside a wide window is
+the paging problem in disguise. Returning `RRULE`-bearing components
+unexpanded with a `recurrence` marker would keep a listing small, but it
+hands the caller the recurrence rule — the reasoning the timezone rule
+exists to avoid. Deferred rather than decided: v1 expands.
+2. **`search` scope.** Summary/description/location is a guess. Whether it
+should also cover `categories` and attendee names is worth revisiting once
+real queries exist — a substring match on an attendee list is a privacy
+question as much as a relevance one.
+3. **Dedupe key when CalDAV and ICS overlap.** Phase 3 dedupes by
+`(uid, start)`. Two sources for the same meeting may not share a UID,
+and two genuinely distinct events may. Worth checking against a real
+feed before Phase 3 rather than guessing.
+4. **Task paging without a date range.** Open tasks default to no range, so
+there is no window to anchor a cursor to. Either the cursor anchors purely
+to `(due, id)` with nulls last, or tasks grow a required range. Phase 2
+will settle it.
+5. **Does `readonly` need to be per-occurrence?** A recurring series
+override cannot be individually read-only in CalDAV, so no — but if a
+server is ever found that disagrees, this is the field that would have to
+change shape, and callers would notice.
 
-Resolved in review: one `TZ` env var (no alias); **all output normalized
-into `TZ`** so the caller never does offset/DST reasoning; `UID::Occurrence`
-composite ids; paging with `truncated` + `next_from`; tasks default to open
-tasks only; calendar membership is event metadata rather than its own tool;
-Basic auth for v1; `errors` is a single human-readable string with
-UID+calendar detail in the log; ICS is a URL that may be `file://` and may
-change at any time.
+Resolved in review (second pass): ICS is **`http(s)` only** (`file://`
+dropped — not worth a parallel fetch path); paging is an **opaque
+`cursor`/`next_cursor`** for consistency with the other tools and MCP
+itself; `limit` defaults to **50** (max 200); `readonly` is included **from
+Phase 1** because writes are coming; the occurrence half of a composite id
+is **UTC** so it survives a `TZ` change; ICS is **deferred to Phase 3** and
+must be indistinguishable from a read-only CalDAV calendar, with no
+provider vocabulary anywhere in the tool surface.
+
+Resolved in review (first pass): one `TZ` env var (no alias); **all output
+normalized into `TZ`** so the caller never does offset/DST reasoning;
+`UID::Occurrence` composite ids; tasks default to open tasks only; calendar
+membership is event metadata rather than its own tool; Basic auth for v1;
+`errors` is a single human-readable string with UID+calendar detail in the
+log; ICS is assumed to change at any time.
 
 Also settled while drafting: no writes in v1; no server-side `expand`
 (finding 2); `symfony/http-client` + `sabre/vobject` over `sabre/dav`'s

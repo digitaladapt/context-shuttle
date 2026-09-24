@@ -27,18 +27,24 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
   surfaced the things that changed the design: server-side `expand`
   shifts recurring events by an hour across a DST boundary (so expansion
   is client-side); occurrences of one series share a UID (so occurrences
-  are addressed by a composite `UID::Occurrence` id); an unresolvable
+  are addressed by a composite `UID::Occurrence` id, with the occurrence
+  in UTC so an id survives a `TZ` change); an unresolvable
   `TZID` silently parses as UTC and `TimeZoneUtil` returns UTC for a
   fixed-offset `TZID` (so offsets are recovered or counted, never
   guessed); a fixed-offset `TZID` like `UTC-04:00` throws in
   `sabre/vobject` (so per-item failures are isolated, reported as one
   human-readable `errors` string with UID+calendar detail in the log);
-  converting an all-day `DATE` through a timezone shifts the day (so
-  `DATE` values are never converted); and `symfony/http-client` rejects
-  `file://` (so an ICS URL that is a local file needs its own fetch
-  path). One `TZ` env var is the only timezone in the system: all output
+  converting an all-day `DATE` through a timezone shifts the day, and a
+  bare `DATE` also parses as a valid instant (so `DATE` values are never
+  converted, and occurrence-id parsing is regex-first with the date case
+  first). One `TZ` env var is the only timezone in the system: all output
   is normalized into it, so a caller never reasons about offsets or DST.
-  Planning only; no code yet.
+  Paging is an opaque `cursor`/`next_cursor` with `limit` defaulting to
+  50, `readonly` ships from the start because CalDAV writes are coming,
+  and ICS is deferred to Phase 3 — `http(s)` only, since
+  `symfony/http-client` refuses `file://`, and shaped so it is
+  indistinguishable from a read-only CalDAV calendar. Planning only; no
+  code yet.
 
 
 ### Changed

@@ -18,10 +18,11 @@ Ordered by value; nothing here is scheduled until it is needed.
   `calendar_get_event`): one provider abstraction, `symfony/http-client` +
   `sabre/vobject` rather than `sabre/dav`'s client, client-side recurrence
   expansion (server-side `expand` was verified to shift recurring events by
-  an hour across a DST boundary), composite `UID::Occurrence` ids for the
-  many-occurrences-one-UID problem, and a single `TZ` env var that **all**
-  output is normalized into, so a caller never reasons about offsets or
-  DST. Design: `docs/design/CALENDARS.md`.
+  an hour across a DST boundary), composite `UID::Occurrence` ids with the
+  occurrence in **UTC** so an id survives a `TZ` change, an opaque page
+  cursor, `readonly` present from the start because writes are coming, and a
+  single `TZ` env var that **all** output is normalized into, so a caller
+  never reasons about offsets or DST. Design: `docs/design/CALENDARS.md`.
 - **Persistent MCP sessions** (opt-in): cache-backed `SessionHandler`
   (`withSession('cache', ...)`) behind a flag, for clients that want
   server-initiated notifications. Default stays stateless.
@@ -36,10 +37,11 @@ Ordered by value; nothing here is scheduled until it is needed.
 
 - **Calendar tasks** (VTODO) through the same provider contract and
   mapper: `calendar_list_tasks`, `calendar_get_task`. Then the **ICS
-  provider** — a URL that may be `file://`, assumed to change at any time,
-  which needs its own fetch path (`symfony/http-client` rejects
-  `file://`). Phases 2–3 of `docs/design/CALENDARS.md`; confirms the
-  abstraction before it is under write pressure.
+  provider** — a plain `http(s)` `GET` (no `file://`), read-only, same
+  contract, dedupe by `(uid, start)` when both are configured, and shaped so
+  it is indistinguishable from a read-only CalDAV calendar. Phases 2–3 of
+  `docs/design/CALENDARS.md`; confirms the abstraction before it is under
+  write pressure.
 - **Resources and prompts**: the YAML registry generalises — a `type:`
   discriminator (`tool` | `resource` | `prompt`) per file. The library's
   `withResource`/`withPrompt` already accept manual definitions.
