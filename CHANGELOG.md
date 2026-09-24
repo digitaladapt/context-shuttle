@@ -20,6 +20,19 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
   with a per-provider delivery report, and a harness-facing short-poll
   status endpoint for polling without LLM intervention. Planning only;
   no code yet.
+- `docs/design/CALENDARS.md`: design draft for calendar read access —
+  CalDAV events first (`calendar_list_calendars`,
+  `calendar_list_events`, `calendar_get_event`), then tasks, then an ICS
+  provider, then CalDAV writes. Written against a live Radicale 3.8.0
+  instance rather than from documentation, which surfaced four things
+  that changed the design: server-side `expand` shifts recurring events
+  by an hour across a DST boundary (so expansion is client-side);
+  occurrences of one series share a UID (so occurrences are addressed by
+  a composite `id`); an unresolvable `TZID` silently parses as UTC (so
+  offsets are flagged, never guessed); and a fixed-offset `TZID` like
+  `UTC-04:00` throws in `sabre/vobject` (so per-item failures are
+  isolated instead of failing the listing). Planning only; no code yet.
+
 
 ### Changed
 

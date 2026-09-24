@@ -14,6 +14,14 @@ Ordered by value; nothing here is scheduled until it is needed.
   harness-facing status endpoint (`GET /inputs/{id}`) so a harness can
   poll for answers without LLM intervention. Design:
   `docs/design/ALERTS.md`.
+- **Calendar read access — CalDAV events** (`calendar_list_calendars`,
+  `calendar_list_events`, `calendar_get_event`): one provider abstraction
+  with `symfony/http-client` + `sabre/vobject` instead of `sabre/dav`'s
+  client, client-side recurrence expansion (server-side `expand` was
+  verified to produce wrong instants across a DST boundary), composite
+  occurrence ids for the many-occurrences-one-UID problem, and a `TZ`
+  display-zone model where a wrong `TZ` can mis-render but never change an
+  instant. Design: `docs/design/CALENDARS.md`.
 
 - **Persistent MCP sessions** (opt-in): cache-backed `SessionHandler`
   (`withSession('cache', ...)`) behind a flag, for clients that want
@@ -27,6 +35,11 @@ Ordered by value; nothing here is scheduled until it is needed.
 
 ## Mid term
 
+- **Calendar tasks** (VTODO) through the same provider contract and
+  mapper: `calendar_list_tasks`, `calendar_get_task`. Then the **ICS
+  provider** — read-only, same contract, dedupe by `(uid, start)` when
+  both are configured. Phases 2–3 of `docs/design/CALENDARS.md`;
+  confirms the abstraction before it is under write pressure.
 - **Resources and prompts**: the YAML registry generalises — a `type:`
   discriminator (`tool` | `resource` | `prompt`) per file. The library's
   `withResource`/`withPrompt` already accept manual definitions.
@@ -41,6 +54,12 @@ Ordered by value; nothing here is scheduled until it is needed.
   instead of a webhook, ntfy `http` actions) behind the same tool contract
   as the web-form flow, if the form proves insufficient. Phase 3 of
   `docs/design/ALERTS.md`.
+- **CalDAV writes** (create/update/delete events, then tasks) on a single
+  configured editable calendar, with `etag`/`If-Match` optimistic
+  concurrency from day one. "Update the meeting I just showed you" is the
+  real use case, and last-write-wins corrupts a shared calendar. Phase 4
+  of `docs/design/CALENDARS.md`.
+
 - **Upstream the Symfony 8 constraint** of the php-mcp fork so the pin
   can move to a tagged release.
 - **Rector** adoption — only after coverage reaches 100% (§2.3 ordering).
