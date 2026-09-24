@@ -5,12 +5,18 @@ parameters:
     env(LOG_LEVEL): 'info'
     env(PENNYTRACK_URL): ''
     env(PENNYTRACK_API_KEY): ''
+    env(VITALPULSE_URL): ''
+    env(VITALPULSE_API_KEY): ''
 
     # Penny-track tool configuration. Empty defaults keep tool listing
     # working on deployments without penny-track; the tool fails with a
     # clear message when invoked unconfigured.
     pennytrack_url: '%env(string:default::PENNYTRACK_URL)%'
     pennytrack_api_key: '%env(string:default::PENNYTRACK_API_KEY)%'
+
+    # Vital-pulse tool configuration, same pattern as penny-track above.
+    vitalpulse_url: '%env(string:default::VITALPULSE_URL)%'
+    vitalpulse_api_key: '%env(string:default::VITALPULSE_API_KEY)%'
 
     # Cross-Origin-Resource-Policy applied to every response by
     # CorsSubscriber when CORS_RESOURCE_POLICY is unset or empty
@@ -75,3 +81,9 @@ services:
         arguments:
             $baseUrl: '%pennytrack_url%'
             $apiKey: '%pennytrack_api_key%'
+
+    App\Tool\VitalPulse\HealthLogsTool:
+        public: true
+        arguments:
+            $baseUrl: '%vitalpulse_url%'
+            $apiKey: '%vitalpulse_api_key%'
