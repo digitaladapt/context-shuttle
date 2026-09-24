@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Calendar\Paging;
 
 use InvalidArgumentException;
+use JsonException;
 
 /**
  * An opaque position in a listing.
@@ -64,7 +65,7 @@ final readonly class Cursor
 
         try {
             $payload = json_decode($decoded, true, 8, \JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
+        } catch (JsonException) {
             throw new InvalidArgumentException('cursor is not a valid paging token; pass back the value of next_cursor verbatim, or omit it entirely to start from the beginning.');
         }
 

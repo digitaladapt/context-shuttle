@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Xml;
 
+use RuntimeException;
 use Sabre\Xml\Deserializer;
 use Sabre\Xml\Reader;
 use Sabre\Xml\Service;
@@ -125,7 +126,7 @@ final class DavMultistatusParser
         // multistatus; a document that is not one is a server problem worth
         // failing loudly on rather than silently treating as empty.
         if (!\is_array($parsed)) {
-            throw new \RuntimeException('The calendar server sent a response that is not a DAV multistatus document.');
+            throw new RuntimeException('The calendar server sent a response that is not a DAV multistatus document.');
         }
 
         $responses = [];

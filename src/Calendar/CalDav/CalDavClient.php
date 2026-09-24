@@ -9,6 +9,7 @@ use App\Calendar\Domain\CalendarObject;
 use App\Calendar\Domain\ComponentType;
 use App\Xml\DavMultistatusParser;
 use DateTimeImmutable;
+use DateTimeZone;
 use RuntimeException;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
@@ -131,7 +132,7 @@ final readonly class CalDavClient
      */
     public function fetchByTimeRange(CalendarInfo $calendar, DateTimeImmutable $from, DateTimeImmutable $to, ComponentType $type): array
     {
-        $body = sprintf(
+        $body = \sprintf(
             <<<'XML'
                 <?xml version="1.0" encoding="utf-8"?>
                 <c:calendar-query xmlns:d="DAV:" xmlns:c="%s">
@@ -150,8 +151,8 @@ final readonly class CalDavClient
                 XML,
             $this->namespaceCalDav(),
             $type->value,
-            $from->setTimezone(new \DateTimeZone('UTC'))->format('Ymd\THis\Z'),
-            $to->setTimezone(new \DateTimeZone('UTC'))->format('Ymd\THis\Z'),
+            $from->setTimezone(new DateTimeZone('UTC'))->format('Ymd\THis\Z'),
+            $to->setTimezone(new DateTimeZone('UTC'))->format('Ymd\THis\Z'),
         );
 
         $xml = $this->request('REPORT', $this->url($calendar), $body, depth: '1');
@@ -175,10 +176,10 @@ final readonly class CalDavClient
         $links = '';
 
         foreach ($hrefs as $href) {
-            $links .= sprintf('<d:href>%s</d:href>', htmlspecialchars($href, \ENT_XML1));
+            $links .= \sprintf('<d:href>%s</d:href>', htmlspecialchars($href, \ENT_XML1));
         }
 
-        $body = sprintf(
+        $body = \sprintf(
             <<<'XML'
                 <?xml version="1.0" encoding="utf-8"?>
                 <c:calendar-multiget xmlns:d="DAV:" xmlns:c="%s">
@@ -243,7 +244,7 @@ final readonly class CalDavClient
             return null;
         }
 
-        $body = sprintf(
+        $body = \sprintf(
             <<<'XML'
                 <?xml version="1.0" encoding="utf-8"?>
                 <d:propfind xmlns:d="DAV:" xmlns:c="%s">
@@ -330,7 +331,7 @@ final readonly class CalDavClient
             }
 
             if ($status >= 500 && $attempt < self::MAX_ATTEMPTS) {
-                $lastError = new RuntimeException(sprintf('calendar server returned HTTP %d', $status));
+                $lastError = new RuntimeException(\sprintf('calendar server returned HTTP %d', $status));
                 $this->drain($response);
 
                 continue;
@@ -339,22 +340,13 @@ final readonly class CalDavClient
             if ($status >= 400) {
                 $detail = $this->safeBody($response);
 
-                throw new RuntimeException(sprintf(
-                    'The calendar server returned HTTP %d for %s.%s',
-                    $status,
-                    $method,
-                    '' === $detail ? '' : ' '.$detail,
-                ));
+                throw new RuntimeException(\sprintf('The calendar server returned HTTP %d for %s.%s', $status, $method, '' === $detail ? '' : ' '.$detail));
             }
 
             return $response->getContent();
         }
 
-        throw new RuntimeException(sprintf(
-            'Could not reach the calendar server at %s: %s',
-            $this->baseUrl(),
-            $lastError?->getMessage() ?? 'unknown transport error',
-        ), 0, $lastError);
+        throw new RuntimeException(\sprintf('Could not reach the calendar server at %s: %s', $this->baseUrl(), $lastError?->getMessage() ?? 'unknown transport error'), 0, $lastError);
     }
 
     /**

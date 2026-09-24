@@ -111,7 +111,14 @@ final readonly class EventMapper
         $unreliableUids = $this->unreliableUids($calendar, $declaredTimezones, $object, $problems);
 
         try {
-            $expanded = $calendar->expand($from, $to);
+            // The third argument matters: `expand()` strips each date-time
+            // down to a UTC value, and for a **floating** time (no zone at
+            // all) it resolves the wall clock in the zone given here — which
+            // would otherwise be UTC rather than the deployment's. Passing
+            // `TZ` keeps a floating 09:00 meaning 09:00 where the calendar is
+            // being read, while TZID-bearing properties still honour their own
+            // zone, because sabre prefers the parameter when one is present.
+            $expanded = $calendar->expand($from, $to, $this->timeZone->zone());
         } catch (Throwable $e) {
             return [[], [new CalendarProblem(
                 reason: 'recurrence expansion failed: '.$e->getMessage(),

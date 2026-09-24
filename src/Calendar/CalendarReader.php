@@ -11,8 +11,8 @@ use App\Calendar\Domain\CalendarProblem;
 use App\Calendar\Domain\ComponentType;
 use App\Calendar\Mapping\EventMapper;
 use App\Calendar\Paging\Cursor;
-use App\Calendar\Paging\Paginator;
 use App\Calendar\Paging\Page;
+use App\Calendar\Paging\Paginator;
 use DateTimeImmutable;
 use Psr\Log\LoggerInterface;
 
@@ -145,7 +145,8 @@ final readonly class CalendarReader
     {
         $needle = mb_strtolower($needle);
 
-        return array_values(array_filter($events, static function (CalendarEvent $event) use ($needle): bool {            foreach ([$event->summary, $event->description, $event->location] as $field) {
+        return array_values(array_filter($events, static function (CalendarEvent $event) use ($needle): bool {
+            foreach ([$event->summary, $event->description, $event->location] as $field) {
                 if (null !== $field && str_contains(mb_strtolower($field), $needle)) {
                     return true;
                 }

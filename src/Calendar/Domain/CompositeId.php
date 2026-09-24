@@ -95,7 +95,12 @@ final readonly class CompositeId
             $instant = DateTimeImmutable::createFromFormat(DateTimeImmutable::ATOM, $tail, new DateTimeZone('UTC'));
 
             if (false !== $instant) {
-                return new self($uid, $instant, null, true);
+                // Normalize to UTC. Keeping the parsed offset would make
+                // `toString()` print the local wall clock followed by a
+                // literal `Z` — turning an instant of 19:00Z into `15:00Z`,
+                // which is the same shape of silent shift the date case is
+                // ordered to avoid.
+                return new self($uid, $instant->setTimezone(new DateTimeZone('UTC')), null, true);
             }
         }
 
