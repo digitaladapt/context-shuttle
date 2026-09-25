@@ -11,6 +11,7 @@ parameters:
     env(CALDAV_USERNAME): ''
     env(CALDAV_PASSWORD): ''
     env(CALDAV_CALENDARS): ''
+    env(CALDAV_EDITABLE_CALENDAR): ''
     env(ICS_URL): ''
     env(ICS_NAME): 'ics'
     env(NTFY_URL): ''
@@ -52,6 +53,11 @@ parameters:
     caldav_username: '%env(string:default::CALDAV_USERNAME)%'
     caldav_password: '%env(string:default::CALDAV_PASSWORD)%'
     caldav_calendars: '%env(string:default::CALDAV_CALENDARS)%'
+    # The ONE calendar writes may target. Empty means no write tool is
+    # registered at all, which is the opposite default to CALDAV_CALENDARS on
+    # purpose: not thinking about reads is harmless, not thinking about writes
+    # is not.
+    caldav_editable_calendar: '%env(string:default::CALDAV_EDITABLE_CALENDAR)%'
     ics_url: '%env(string:default::ICS_URL)%'
     ics_name: '%env(string:default::ICS_NAME)%'
 
@@ -202,6 +208,18 @@ services:
         arguments:
             $timeZone: '%calendar_timezone%'
 
+    # The write boundary, as a service because two places need the same
+    # answer: `CalDavClient` narrowing `readonly`, and the tool gate deciding
+    # whether the write tools exist. Two copies of that answer would be two
+    # chances for `readonly: false` and a registered write tool to disagree.
+    App\Calendar\Domain\EditableCalendar:
+        arguments:
+            $configured: '%caldav_editable_calendar%'
+
+    App\Calendar\CalendarWriteGate:
+        arguments:
+            $editableCalendar: '@App\Calendar\Domain\EditableCalendar'
+
     App\Calendar\CalDav\CalDavClient:
         arguments:
             $configuredBaseUrl: '%caldav_url%'
@@ -212,6 +230,7 @@ services:
             # logged rather than silently serving a narrower listing.
             $allowedCalendars: '%caldav_calendars%'
             $logger: '@monolog.logger.mcp_invocation'
+            $editableCalendar: '@App\Calendar\Domain\EditableCalendar'
 
     # ── Calendar sources ────────────────────────────────────────────────
     # Both sources satisfy one contract, so the reader never learns which
@@ -226,10 +245,21 @@ services:
             $url: '%ics_url%'
             $name: '%ics_name%'
 
+    App\Calendar\Write\EventWriter:
+        arguments:
+            $logger: '@monolog.logger.mcp_invocation'
+
     App\Calendar\CalendarReader:
         arguments:
             $providers: !tagged_iterator app.calendar_provider
             $logger: '@monolog.logger.mcp_invocation'
+
+    # The registry's availability gate is wired here because the registry
+    # itself is registered by ToolRegistryPass. Pinned to the calendar gate
+    # explicitly rather than autowired: with a second ToolAvailability
+    # implementation, autowiring would pick one arbitrarily and the write
+    # tools' visibility would depend on service ordering.
+    App\ToolRegistry\ToolAvailability: '@App\Calendar\CalendarWriteGate'
 
     App\Tool\Calendar\ListEventsTool:
         public: true
@@ -241,6 +271,20 @@ services:
         public: true
 
     App\Tool\Calendar\GetTaskTool:
+        public: true
+
+    # Write tools. Public like every other handler — the YAML dispatcher
+    # resolves them by name from the container. Their *availability* is a
+    # separate question, decided by the gate above: a private service here
+    # would still be listed if the gate allowed it, so visibility lives in one
+    # place rather than two.
+    App\Tool\Calendar\CreateEventTool:
+        public: true
+
+    App\Tool\Calendar\UpdateEventTool:
+        public: true
+
+    App\Tool\Calendar\DeleteEventTool:
         public: true
 
     # ── Alerts ─────────────────────────────────────────────────────────

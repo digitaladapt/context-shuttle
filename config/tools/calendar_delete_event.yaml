@@ -1,0 +1,25 @@
+# Calendar event deletion.
+#
+# Registered only when a calendar has been named for writing
+# (`requires_writes`), like the other two write tools.
+#
+# Deliberately one parameter: the id carries the scope, and a separate
+# "delete the whole series" flag would be a second way to express what the id
+# already says — and the one most likely to be passed wrongly, when the
+# consequence is a deletion with no undo.
+name: calendar_delete_event
+description: >
+  Delete an event. The id decides how much is deleted: pass back an id from
+  calendar_list_events to remove just that one occurrence, leaving the rest
+  of a recurring series in place; pass a plain series uid (the uid field) to
+  delete the event and every occurrence of it. Deleting a single occurrence
+  of an event that does not repeat is refused with a message explaining why,
+  rather than deleting the whole thing. There is no undo, so check the id
+  with calendar_get_event first if you are unsure which one it is.
+requires_writes: true
+handler: App\Tool\Calendar\DeleteEventTool::deleteEvent
+parameters:
+  id:
+    type: string
+    description: 'An id from calendar_list_events to delete one occurrence, or a plain series uid to delete the whole event.'
+    required: true

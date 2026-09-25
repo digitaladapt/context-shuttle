@@ -157,6 +157,14 @@ final class ToolLoader
             $validated[$paramName] = $def;
         }
 
+        $requiresWrites = false;
+        if (\array_key_exists('requires_writes', $raw)) {
+            if (!\is_bool($raw['requires_writes'])) {
+                throw new ToolDefinitionException("Tool file {$relative}: 'requires_writes' must be a boolean.");
+            }
+            $requiresWrites = $raw['requires_writes'];
+        }
+
         $defaultLocation = null;
         if (\array_key_exists('default_location', $raw)) {
             $loc = $raw['default_location'];
@@ -180,6 +188,7 @@ final class ToolLoader
             handler: $handler,
             parameters: $validatedParams,
             defaultLocation: $defaultLocation,
+            requiresWrites: $requiresWrites,
         );
     }
 

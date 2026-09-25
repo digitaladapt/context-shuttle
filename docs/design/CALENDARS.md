@@ -30,8 +30,10 @@ calendar, so every output row is self-describing.
 
 Non-goals for v1:
 
-- **No writes.** CalDAV create/update/delete is a later phase. ICS is
-  read-only by nature and stays that way.
+- **No writes in v1.** CalDAV create/update/delete is Phase 4, and its
+  shape is settled in advance (*Writes*, below) so the read surface does
+  not have to be retrofitted around it. ICS is read-only by nature and
+  stays that way.
 - **No alarms/VALARM** in the tool surface. Parsed and ignored; exposing
   them is a later, purely additive change.
 - **No background polling / subscriptions.** Every call fetches.
@@ -325,6 +327,14 @@ event** rather than nested inside the `calendar` object.
   still dropped: `readonly` is the single source of truth, and two fields
   that must always agree is a bug waiting to happen.
 
+With writes implemented, `readonly` means "**these tools** can edit this row"
+— see *Writes*, below. It no longer reports the server's own privilege set on
+its own: a calendar the server would accept a write for, but which is not the
+one designated for writing, reads `readonly: true`, because these tools will
+not touch it. The change was a *narrowing* — rows only ever flip from `false`
+to `true`, never the reverse — and it landed with the tools that make it
+meaningful, so no deployment ever saw it say something untrue.
+
 ### `calendar_get_event`
 
 | Parameter | Type | Req | Notes |
@@ -350,6 +360,111 @@ date-only when the task is date-only), `status`, `percent_complete`,
   step.
 - Paging is the same opaque cursor (`limit` / `cursor` / `next_cursor`).
 - Filtering is client-side after the fetch (finding 12).
+
+## Writes: one calendar, named in config, never in an argument ⚠️
+
+Scope of **this section**: the shape of the write path, fixed before any of
+it is built. The tools themselves are Phase 4 and remain contingent.
+
+### There is exactly one writable calendar, and it is configured, not chosen
+
+A single optional variable names the one calendar writes may touch:
+
+| Var | Default | Purpose |
+|---|---|---|
+| `CALDAV_EDITABLE_CALENDAR` | *(empty)* | the **one** calendar writes may target; empty ⇒ no write tools are registered |
+
+(The same row appears in *Configuration*, below; that table is the
+canonical list of variables, and this one repeats it so the reasoning here
+stands on its own.)
+
+Three rules follow, and they are the whole design:
+
+1. **Empty means read-only.** With no calendar named, the create/update/delete
+   tools are **not registered** — they are absent from `tools/list`, not
+   present-and-erroring. A deployment that has not opted in is one where a
+   model cannot even see a mutation verb, which is a stronger statement than
+   a refusal at call time and the one an operator can verify by looking.
+   (This is deliberate divergence from how the *read* tools behave with no
+   `CALDAV_URL`: those stay listed and explain themselves, because a read
+   tool that reports "not configured" has told the truth. An unregistered
+   write tool cannot be talked into trying.)
+2. **No write tool takes a `calendar` parameter.** Every create/update/delete
+   call targets the configured calendar, full stop. The read tools accept an
+   optional `calendar` filter and that precedent does **not** carry over —
+   the difference is deliberate and is the point of the whole arrangement. A
+   model that could name a target could name the wrong one, and the mistake
+   would be unrecoverable in a way a bad read never is.
+3. **The value is matched the same way `CALDAV_CALENDARS` is** — full href
+   (`/user/work/`) or bare trailing segment (`work`) — and, being an
+   exposure boundary like that one, an entry matching no discovered calendar
+   is **logged with the calendars the server did offer** rather than silently
+   leaving the deployment read-only.
+
+### `readonly` becomes "these tools can edit this"
+
+With writes present, the shipped meaning of `readonly` narrows. It stops
+reporting the server's own privilege set and starts reporting whether **this
+deployment** will edit the row:
+
+| Row | Today | With writes enabled |
+|---|---|---|
+| server-read-only calendar | `true` | `true` |
+| server-writable, **not** the configured calendar | `false` | **`true`** |
+| server-writable, **is** the configured calendar | `false` | `false` |
+| ICS feed | `true` | `true` |
+
+The third row is the common case and the second is the one that matters. A
+server may let us write to five calendars; we expose one. If `readonly`
+reported the server's opinion, every row in the other four would read
+`readonly: false` and a caller would be told, in the field specifically
+designed to answer the question, that an edit was available when it was not.
+
+This is a **narrowing**: rows only ever flip `false` → `true`, never the
+reverse, and no row that was editable becomes un-editable by it. The
+privilege set is not discarded — it still decides whether the *configured*
+calendar is editable at all, so a deployment that names a calendar the
+server forbids writing still reports `readonly: true` everywhere and its
+write tools fail with the server's own refusal. Both conditions must hold:
+**the server permits it and we were told to.**
+
+The field keeps its single value and its flat placement; no `editable`
+companion returns. One field, one question, one answer.
+
+### What implementation settled
+
+The three open questions above were decided against a live server; the raw
+measurements are in `CALENDAR-WRITES-FINDINGS.md` alongside this document.
+
+- **The tools.** `calendar_create_event`, `calendar_update_event`,
+  `calendar_delete_event` — events only in this phase, tasks to follow behind
+  the same three rules. Verified through `tools/list`: none of them declares a
+  `calendar` parameter, and all three are absent when
+  `CALDAV_EDITABLE_CALENDAR` is unset.
+- **A mutation's scope comes from the id.** A composite id names one
+  occurrence, a plain UID names the series, and there is no parameter to say
+  which — the id already says it, and a second way to say it would be a second
+  thing to get wrong. Editing an occurrence writes a `RECURRENCE-ID` override
+  *into the existing object*; deleting one writes an `EXDATE`; deleting the
+  series is a real `DELETE`.
+- **An id's occurrence half is the occurrence's current start**, so a *moved*
+  occurrence is addressed by its new time while its override is keyed on the
+  original slot. The object is expanded to recover that slot, because the id
+  alone cannot say which slot it came from.
+- **"This and future" is not supported.** The nearest supported thing is
+  truncating a series (`RRULE` rewritten to an `UNTIL`), which is a
+  well-defined change rather than an approximation of a series split. It is
+  deliberately not wired to a tool yet: it is a real capability with no caller,
+  and the design's rule about building only what is needed applies to it too.
+- **Deletes are not refused for a series with attendees** — YAGNI, as
+  elsewhere. The tool description says there is no undo; a blast-radius rule
+  is worth adding when a real calendar shows it matters.
+
+Two implementation findings that changed the code, recorded because both were
+invisible until measured: a UID must never become a path segment (a
+percent-encoded `..` escapes the collection), and an object carrying a moved
+occurrence **must not** be looked up by time window, because a `time-range`
+query does not see an override's new time and answers `200` with nothing.
 
 ## Errors are a sentence, detail is a log ⚠️
 
@@ -504,11 +619,21 @@ uncached — it is the thing whose freshness the caller is asking about, and
 | `CALDAV_CALENDARS` | *(empty)* | optional comma-separated `href`s to expose; empty ⇒ all discovered |
 | `ICS_URL` | *(empty)* | ICS feed URL. **`http(s)://` only** (`file://` is not supported). Empty ⇒ ICS not configured. |
 | `ICS_NAME` | `ics` | display name for the synthetic ICS calendar |
+| `CALDAV_EDITABLE_CALENDAR` | *(empty)* | the **one** calendar writes may target; empty ⇒ no write tools are registered |
 | `TZ` | PHP default (`UTC`) | **the** timezone: all output, and how `from`/`to` are read |
 
 `CALDAV_CALENDARS` exists because a real CalDAV server exposes subscribed
 holidays and shared team calendars, and each one would otherwise land in
 every answer. Default stays "all", so the tool works with zero configuration.
+
+`CALDAV_EDITABLE_CALENDAR` is the **write** boundary and behaves the
+opposite way round: empty means *nothing* is writable and no write tool is
+registered at all, because a default that made a calendar writable
+without anyone saying so is precisely the accident this exists to
+prevent. It is independent of `CALDAV_CALENDARS` — a calendar may be
+exposed for reading and not be the editable one, and the editable one is
+not required to appear in the allowlist (though naming one that is
+filtered out means its rows can never be reached, which is worth knowing).
 
 Both sources are optional; at least one must be configured for the tools to
 be usable, and with neither set they fail with a clear message naming the
@@ -581,7 +706,14 @@ fixtures that matter here. Every finding becomes a test:
   leak the password.
 - **`readonly`**: a calendar advertising read-only privileges reports
   `readonly: true` and a writable one `false`; every expanded occurrence of
-  a series carries it, so a single row is self-describing.
+  a series carries it, so a single row is self-describing. *(Phase 4: this
+  flips to "these tools can edit this" — a writable-but-not-designated
+  calendar reports `true`. Both conditions are asserted: the server must
+  permit it and it must be the configured calendar.)*
+- **Write gating** *(Phase 4)*: with `CALDAV_EDITABLE_CALENDAR` unset the
+  write tools do not appear in `tools/list`; with it set they appear and
+  none of them declares a `calendar` parameter. An entry naming a calendar
+  the server does not offer is logged, not ignored.
 - **No provider leakage**: a test asserting that no tool result and no YAML
   description contains `caldav`, `ics`, `source`, or `provider` — so Phase 3
   cannot introduce a provider-shaped field by accident.
@@ -614,11 +746,14 @@ so CI stays hermetic.
   CalDAV is also configured. The acceptance criterion is not that it
   fetches, it is that its output is **indistinguishable from a read-only
   CalDAV calendar** — one `readonly` flag and nothing else.
-- **Phase 4 (contingent) — CalDAV writes.** Events then tasks, on a single
-  configured editable calendar, with `If-Match` optimistic concurrency from
-  day one: "update the meeting I just showed you" is the real use case, and
-  last-write-wins corrupts a shared calendar. `readonly` is how a caller
-  knows which occurrences it can act on.
+- **Phase 4 — CalDAV writes.** Events then tasks, on the one
+  calendar named by `CALDAV_EDITABLE_CALENDAR`, with `If-Match` optimistic
+  concurrency from day one: "update the meeting I just showed you" is the
+  real use case, and last-write-wins corrupts a shared calendar. No write
+  tool takes a `calendar` argument, and with the variable unset the tools
+  are not registered at all — see *Writes*, above, which is the normative
+  description. `readonly` narrows to "these tools can edit this" in the
+  same change.
 
 ## Deferred deliberately (YAGNI)
 
@@ -673,6 +808,12 @@ normalized into `TZ`** so the caller never does offset/DST reasoning;
 membership is event metadata rather than its own tool; Basic auth for v1;
 `errors` is a single human-readable string with UID+calendar detail in the
 log; ICS is assumed to change at any time.
+
+Settled in review (fourth pass, before Phase 4 began): writes target one
+calendar named by **`CALDAV_EDITABLE_CALENDAR`**, empty means the write
+tools are **not registered at all**, no write tool takes a `calendar`
+argument, and `readonly` narrows to "these tools can edit this" so a
+writable-but-not-designated calendar reports `true`. See *Writes*, above.
 
 Also settled while drafting: no writes in v1; no server-side `expand`
 (finding 2); `symfony/http-client` + `sabre/vobject` over `sabre/dav`'s
