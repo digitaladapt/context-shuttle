@@ -120,6 +120,7 @@ final class ListEventsToolTest extends TestCase
         $reader = new CalendarReader(
             new CalDavClient($client, self::BASE, 'user', 'secret'),
             new EventMapper(new TimeZoneRule($zone)),
+            new TimeZoneRule($zone),
         );
 
         return new ListEventsTool($reader, new TimeZoneRule($zone));
@@ -229,7 +230,7 @@ final class ListEventsToolTest extends TestCase
         }, self::BASE);
 
         $zone = new TimeZoneRule('UTC');
-        $reader = new CalendarReader(new CalDavClient($client, self::BASE, 'u', 'p'), new EventMapper($zone));
+        $reader = new CalendarReader(new CalDavClient($client, self::BASE, 'u', 'p'), new EventMapper($zone), $zone);
         $tool = new ListEventsTool($reader, $zone);
 
         $result = $tool->listEvents('2026-10-01', '2026-10-31');
@@ -337,6 +338,7 @@ final class ListEventsToolTest extends TestCase
         $reader = new CalendarReader(
             new CalDavClient(new MockHttpClient(), '', 'u', 'p'),
             new EventMapper($zone),
+            $zone,
         );
 
         $tool = new ListEventsTool($reader, $zone);

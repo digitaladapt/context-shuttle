@@ -7,8 +7,11 @@ namespace App\Calendar;
 use App\Calendar\CalDav\CalDavClient;
 use App\Calendar\Domain\CalendarEvent;
 use App\Calendar\Domain\CalendarInfo;
+use App\Calendar\Domain\CalendarObject;
 use App\Calendar\Domain\CalendarProblem;
 use App\Calendar\Domain\ComponentType;
+use App\Calendar\Domain\CompositeId;
+use App\Calendar\Domain\TimeZoneRule;
 use App\Calendar\Mapping\EventMapper;
 use App\Calendar\Paging\Cursor;
 use App\Calendar\Paging\Page;
@@ -31,6 +34,7 @@ final readonly class CalendarReader
     public function __construct(
         private CalDavClient $client,
         private EventMapper $mapper,
+        private TimeZoneRule $timeZone,
         private Paginator $paginator = new Paginator(),
         private ?LoggerInterface $logger = null,
     ) {
@@ -93,6 +97,152 @@ final readonly class CalendarReader
         ];
     }
 
+    /**
+     * Fetch one event by id.
+     *
+     * Two shapes, and the difference is entirely about how much the caller
+     * told us:
+     *
+     * - **A composite id** names one occurrence, so the instant in its tail
+     *   bounds the query to a narrow window: a `calendar-query` over a day
+     *   or two, which the server answers without walking the calendar. The
+     *   design's finding 11 -- that `calendar-multiget` fetches by href --
+     *   remains true, but it needs an href the caller never sees, so the
+     *   narrow window is the cheaper route to the same object.
+     * - **A plain UID** names a series without saying when. There is no
+     *   window to narrow by, so the series is looked up by property and then
+     *   expanded over a bounded range, because v1 always expands and a
+     *   caller asking about `standup@test` is asking what it *is*.
+     *
+     * The returned occurrences keep the same shape a listing produces, so a
+     * caller can switch between the two tools without re-learning the row.
+     *
+     * @param list<CalendarInfo>|null $calendars pre-discovered calendars, to avoid a second PROPFIND
+     *
+     * @return array{events: list<CalendarEvent>, problems: list<CalendarProblem>}
+     */
+    public function getEvent(
+        string $id,
+        ?string $calendar = null,
+        ?DateTimeImmutable $seriesFrom = null,
+        ?DateTimeImmutable $seriesTo = null,
+        ?array $calendars = null,
+    ): array {
+        $composite = CompositeId::parse($id);
+        $calendars ??= $this->selectCalendars($calendar);
+
+        $events = [];
+        $problems = [];
+
+        foreach ($calendars as $info) {
+            if ($composite->hasOccurrence) {
+                // The id names an instant or a date, so the query can be
+                // narrowed to that occurrence before anything is fetched.
+                $objects = $this->client->fetchByTimeRange(
+                    $info,
+                    $this->occurrenceWindow($composite),
+                    $this->occurrenceWindowEnd($composite),
+                    ComponentType::Event,
+                );
+            } else {
+                $objects = $this->client->fetchByUid($info, $composite->uid, ComponentType::Event);
+            }
+
+            foreach ($objects as $object) {
+                [$from, $to] = $this->windowFor($object, $composite, $seriesFrom, $seriesTo);
+
+                [$mapped, $objectProblems] = $this->mapper->map($object, $from, $to);
+
+                foreach ($mapped as $event) {
+                    if ($event->uid !== $composite->uid) {
+                        continue;
+                    }
+
+                    // A composite id names one occurrence, so anything else
+                    // the expansion surfaced is not an answer to this
+                    // question. The window has to be wide enough for the
+                    // server to find the object; the result is narrowed to
+                    // the row the caller asked for.
+                    if ($composite->hasOccurrence && $event->id !== $composite->toString()) {
+                        continue;
+                    }
+
+                    $events[] = $event;
+                }
+
+                foreach ($objectProblems as $problem) {
+                    $problems[] = $problem;
+                }
+            }
+        }
+
+        $this->logProblems($problems);
+
+        return ['events' => $this->order($events), 'problems' => $problems];
+    }
+
+    /**
+     * The expansion window for one fetched object.
+     *
+     * A named occurrence pins it. A plain UID does not, so the window is
+     * anchored on **the series' own declared start** rather than on the
+     * current date — otherwise a historical series expands to nothing, and a
+     * caller asking "what is this?" gets an empty answer that looks like a
+     * missing event. The clamp upstream caps the span at 366 days, so
+     * anchoring on the series and running forward from it is the only
+     * ordering that cannot silently truncate the whole window into the past.
+     *
+     * @return array{0: DateTimeImmutable, 1: DateTimeImmutable}
+     */
+    private function windowFor(
+        CalendarObject $object,
+        CompositeId $composite,
+        ?DateTimeImmutable $seriesFrom,
+        ?DateTimeImmutable $seriesTo,
+    ): array {
+        if ($composite->hasOccurrence) {
+            return [$this->occurrenceWindow($composite), $this->occurrenceWindowEnd($composite)];
+        }
+
+        $anchor = $this->mapper->seriesStart($object)
+            ?? new DateTimeImmutable('today', $this->timeZone->zone());
+
+        $from = $seriesFrom ?? $anchor->modify('-1 day');
+        $to = $seriesTo ?? $from->modify('+1 year');
+
+        return [$from, $to];
+    }
+
+    /**
+     * The window an occurrence id implies, opened out by a day either side so
+     * an event that starts before the instant and runs into it is still
+     * returned. The expansion pass trims by start, so the slack costs nothing
+     * but a slightly wider server-side filter.
+     */
+    private function occurrenceWindow(CompositeId $composite): DateTimeImmutable
+    {
+        if (null !== $composite->instant) {
+            return $composite->instant->modify('-1 day');
+        }
+
+        // An all-day occurrence is a date, so the window is that day in the
+        // deployment's timezone — the same reading the listing would use.
+        return $this->timeZone->startOfDay((string) $composite->date)->modify('-1 day');
+    }
+
+    private function occurrenceWindowEnd(CompositeId $composite): DateTimeImmutable
+    {
+        if (null !== $composite->instant) {
+            return $composite->instant->modify('+1 day');
+        }
+
+        return $this->timeZone->endOfDayExclusive((string) $composite->date)->modify('+1 day');
+    }
+
+    /**
+     * The expansion window for a lookup: the occurrence narrows it, a plain
+     * UID falls back to the caller's bounds.
+     */
     /**
      * @return list<CalendarInfo>
      */

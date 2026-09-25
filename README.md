@@ -155,10 +155,39 @@ All configuration via environment variables — see `.env.example`. Key vars:
 | `NTFY_URL` / `NTFY_TOKEN` | `https://ntfy.sh` / empty | Self-hosted ntfy server and access token |
 | `DISCORD_WEBHOOK_URL` | empty | Enable the Discord channel of `send_alert` |
 | `DISCORD_MENTION_USER_ID` | empty | User mentioned by priority-5 alerts only |
+| `CALDAV_URL` / `CALDAV_USERNAME` / `CALDAV_PASSWORD` | empty | Enable the `calendar_list_events` and `calendar_get_event` tools |
+| `CALDAV_CALENDARS` | empty | Optional comma-separated calendars to expose; empty means all discovered |
+| `TZ` | `UTC` | The timezone every calendar timestamp is rendered in, and date inputs are read in |
 
 Alert channels are enabled by presence: set `NTFY_TOPIC`, `DISCORD_WEBHOOK_URL`,
 or both — every enabled channel receives every alert, and `send_alert` reports
 delivery per channel.
+
+### Calendar access
+
+Read-only access to a CalDAV server, for events. Basic auth only, so an app
+password is usually what you want; `CALDAV_PASSWORD` may live in the secrets
+vault (`bin/console secrets:set CALDAV_PASSWORD`) instead of `.env.local`.
+`CALDAV_URL` is not checked at boot — a calendar server being down must never
+stop context-shuttle from starting — so a misconfiguration surfaces on first
+use, with a message naming the variable.
+
+**Google Calendar is not supported.** Google's CalDAV endpoint no longer
+accepts Basic auth, and OAuth is not implemented, so pointing `CALDAV_URL`
+at Google will fail at authentication rather than half-work. Radicale,
+Nextcloud, Baïkal, Fastmail and Apple app passwords all work.
+
+Timestamps come back already expressed in `TZ`, so a caller never has to
+reason about offsets or daylight-saving changes, and `from`/`to` are read in
+the same zone. Recurring events are expanded into one entry per occurrence,
+each with its own `id`; use that `id` — not the shared `uid` — to fetch one
+occurrence back with `calendar_get_event`.
+
+`CALDAV_CALENDARS` narrows which calendars are exposed at all, which matters
+on a real account that also sees subscribed holidays and shared team
+calendars. Entries may be full hrefs (`/user/work/`) or bare names (`work`);
+an entry that matches nothing is logged with the calendars the server did
+offer, so a typo shows up as a warning rather than as an empty listing.
 
 ## Development
 

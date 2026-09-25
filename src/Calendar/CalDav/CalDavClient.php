@@ -10,6 +10,7 @@ use App\Calendar\Domain\ComponentType;
 use App\Xml\DavMultistatusParser;
 use DateTimeImmutable;
 use DateTimeZone;
+use Psr\Log\LoggerInterface;
 use RuntimeException;
 use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
@@ -48,6 +49,8 @@ final readonly class CalDavClient
         private string $username,
         private string $password,
         private DavMultistatusParser $parser = new DavMultistatusParser(),
+        private string $allowedCalendars = '',
+        private ?LoggerInterface $logger = null,
     ) {
     }
 
@@ -116,7 +119,149 @@ final readonly class CalDavClient
             );
         }
 
-        return $calendars;
+        return $this->applyAllowlist($calendars);
+    }
+
+    /**
+     * Keep only the calendars the operator asked for.
+     *
+     * `CALDAV_CALENDARS` exists because a real account also sees subscribed
+     * holidays and shared team calendars, and every one of those would
+     * otherwise land in every answer. Empty means "all", so a deployment
+     * that has not thought about it still works.
+     *
+     * The allowlist is *the* exposure boundary, so it fails closed: a listed
+     * href that discovery did not return is not silently ignored, it is
+     * reported, because the usual cause is a typo or a calendar the account
+     * cannot see — and both are worth knowing about rather than quietly
+     * serving a narrower answer than the operator intended.
+     *
+     * @param list<CalendarInfo> $calendars
+     *
+     * @return list<CalendarInfo>
+     */
+    private function applyAllowlist(array $calendars): array
+    {
+        $allowed = $this->allowedHrefs();
+
+        if ([] === $allowed) {
+            return $calendars;
+        }
+
+        $kept = [];
+
+        $matched = [];
+
+        foreach ($calendars as $info) {
+            foreach ($allowed as $wanted) {
+                if ($this->hrefMatches($info->href, $wanted)) {
+                    $kept[] = $info;
+                    $matched[$wanted] = true;
+
+                    continue 2;
+                }
+            }
+        }
+
+        // An entry that matched nothing is nearly always a typo or a
+        // calendar this account cannot see. Both are worth a log line,
+        // because the alternative is a listing that looks merely empty.
+        foreach ($allowed as $wanted) {
+            if (!isset($matched[$wanted])) {
+                $this->logger?->warning('CALDAV_CALENDARS entry matched no discovered calendar.', [
+                    'entry' => $wanted,
+                    'discovered' => array_map(static fn (CalendarInfo $info): string => $info->href, $calendars),
+                ]);
+            }
+        }
+
+        return $kept;
+    }
+
+    /**
+     * The configured hrefs, as a list, ignoring empty entries.
+     *
+     * @return list<string>
+     */
+    private function allowedHrefs(): array
+    {
+        if ('' === trim($this->allowedCalendars)) {
+            return [];
+        }
+
+        $hrefs = [];
+
+        foreach (explode(',', $this->allowedCalendars) as $candidate) {
+            $candidate = trim($candidate);
+
+            if ('' !== $candidate) {
+                $hrefs[] = $candidate;
+            }
+        }
+
+        return $hrefs;
+    }
+
+    /**
+     * Whether a discovered href is the one the operator named.
+     *
+     * Compared on the trailing path segment as well as exactly, so both
+     * `/lyra/work/` and `work` match — the former is what a server returns
+     * and the latter is what a human types when reading `.env`.
+     */
+    private function hrefMatches(string $href, string $wanted): bool
+    {
+        $trimmed = rtrim($href, '/');
+        $wantedTrimmed = rtrim($wanted, '/');
+
+        if ($trimmed === $wantedTrimmed) {
+            return true;
+        }
+
+        // `work` should match `/lyra/work/` without matching `/lyra/homework/`.
+        return basename($trimmed) === $wantedTrimmed;
+    }
+
+    /**
+     * Objects in a calendar that carry this UID, wherever they fall in time.
+     *
+     * Used by `calendar_get_event` for a plain UID, where the caller has not
+     * told us *when* the thing is — so no `<time-range>` can be applied and
+     * the match has to be on the property. Radicale supports a `UID`
+     * `prop-filter`; servers that do not simply return the calendar's
+     * objects, which the caller filters on UID afterwards.
+     *
+     * @return list<CalendarObject>
+     */
+    public function fetchByUid(CalendarInfo $calendar, string $uid, ComponentType $type): array
+    {
+        $body = \sprintf(
+            <<<'XML'
+                <?xml version="1.0" encoding="utf-8"?>
+                <c:calendar-query xmlns:d="DAV:" xmlns:c="%s">
+                  <d:prop>
+                    <d:getetag/>
+                    <c:calendar-data/>
+                  </d:prop>
+                  <c:filter>
+                    <c:comp-filter name="VCALENDAR">
+                      <c:comp-filter name="%s">
+                        <c:prop-filter name="UID">
+                          <c:text-match collation="i;octet">%s</c:text-match>
+                        </c:prop-filter>
+                      </c:comp-filter>
+                    </c:comp-filter>
+                  </c:filter>
+                </c:calendar-query>
+                XML,
+            $this->namespaceCalDav(),
+            $type->value,
+            htmlspecialchars($uid, \ENT_XML1),
+        );
+
+        $xml = $this->request('REPORT', $this->url($calendar), $body, depth: '1');
+
+        return $this->collectObjects($xml, $calendar);
     }
 
     /**

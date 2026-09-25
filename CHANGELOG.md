@@ -104,7 +104,23 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
   `sabre/xml`'s `keyValue` deserializer cannot parse a multistatus, since
   it keeps only the last of any repeated element and repeated `<response>`
   elements are how a multistatus carries its payload. Still no
-  `calendar_get_event`, `calendar_list_tasks`, ICS, or writes.
+  `calendar_list_tasks`, ICS, or writes.
+- `calendar_get_event`, closing CalDAV events: it takes either an id
+  from a listing (which fetches exactly that occurrence) or a plain
+  series UID (which expands the series). Both behaviours were caught
+  wrong by running them: the occurrence lookup was returning the
+  neighbours its deliberately-wide server-side window also matched, and
+  the plain-UID window was anchored on "now", so a historical series
+  expanded to nothing — and the 366-day clamp then truncated a
+  two-year window into one that ended in the past, so both anchors
+  returned empty. It now anchors on the series' own `DTSTART`.
+  `CALDAV_CALENDARS` is also live rather than inert: it is the exposure
+  boundary, so it fails closed and logs any entry that matched no
+  discovered calendar, alongside the calendars the server did offer.
+  Adds `CalDavLiveTest`, which runs the read path against a real server
+  when `CALDAV_LIVE_URL` is set and skips otherwise, and documents the
+  calendar tools in the README — including that Google Calendar is not
+  supported, since its CalDAV endpoint no longer accepts Basic auth.
 - `docs/design/EMAIL.md`: design draft for the email tool family — read-
   first IMAP through `directorytree/imapengine` (pure PHP, so no
   `ext-imap`, which is not thread-safe) with **every operation gated by a

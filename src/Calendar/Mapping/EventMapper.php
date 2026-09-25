@@ -68,6 +68,62 @@ final readonly class EventMapper
     }
 
     /**
+     * The earliest start any component in this payload declares, unexpanded.
+     *
+     * Used to anchor an expansion window on the **series itself** rather than
+     * on the current date: a caller looking a series up by UID is saying
+     * nothing about when it happens, and anchoring on "now" would report an
+     * empty series for anything historical — including a one-off event that
+     * already happened.
+     *
+     * Returns null when the payload cannot be read, leaving the caller to
+     * fall back to its own bounds.
+     */
+    public function seriesStart(CalendarObject $object): ?DateTimeImmutable
+    {
+        try {
+            $calendar = Reader::read($this->rewriter->rewrite($object->data), Reader::OPTION_FORGIVING);
+        } catch (Throwable) {
+            return null;
+        }
+
+        if (!$calendar instanceof VCalendar) {
+            return null;
+        }
+
+        $starts = [];
+
+        foreach ($calendar->select('VEVENT') as $component) {
+            if (!$component instanceof VEvent) {
+                continue;
+            }
+
+            $start = $this->dateTimeProperty($component, 'DTSTART');
+
+            if (null === $start) {
+                continue;
+            }
+
+            // An all-day series anchors on its date read in the deployment's
+            // timezone, so the window lines up with how it will be expanded.
+            $instants = $start->getDateTimes($this->timeZone->zone());
+            $first = $instants[0] ?? null;
+
+            if (null !== $first) {
+                $starts[] = DateTimeImmutable::createFromInterface($first);
+            }
+        }
+
+        if ([] === $starts) {
+            return null;
+        }
+
+        usort($starts, static fn (DateTimeImmutable $a, DateTimeImmutable $b): int => $a <=> $b);
+
+        return $starts[0];
+    }
+
+    /**
      * Map one calendar object to the occurrences that fall inside the window.
      *
      * `$from` is inclusive and `$to` exclusive, matching the expansion
