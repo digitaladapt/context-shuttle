@@ -23,6 +23,23 @@ Ordered by value; nothing here is scheduled until it is needed.
   cursor, `readonly` present from the start because writes are coming, and a
   single `TZ` env var that **all** output is normalized into, so a caller
   never reasons about offsets or DST. Design: `docs/design/CALENDARS.md`.
+- **Email tool family** (read-only first): IMAP via
+  `directorytree/imapengine` (pure PHP, no `ext-imap` — which is not
+  thread-safe, and this runs on FrankenPHP), with **every operation gated
+  by a folder allowlist** (read, tag, mark, move-in, move-out are separate
+  permissions) and **no delete at all** — IMAP's only delete is a flag plus
+  a mailbox-wide `EXPUNGE` that would clear flags other clients set, so the
+  destructive verbs are moves into configured folders
+  (`IMAP_TRASH_FOLDER`, `IMAP_ARCHIVE_FOLDER`). Content fetches use
+  `BODY.PEEK` so "show me this email" never marks it read; tracking the
+  agent's own read state uses custom IMAP keywords instead of `\Seen`,
+  because `\Seen` is the human's flag, not the agent's. Written against a
+  live Dovecot 2.4.1 instance, which caught four `imapengine` defects worth
+  working around — including **non-ASCII search silently returning zero
+  results** (search values are mUTF-7 converts; we send `RawQueryValue`
+  with our own quoting) and the friendly header accessor truncating
+  `Authentication-Results` down to the part before the SPF/DKIM/DMARC
+  verdicts. Design: `docs/design/EMAIL.md`.
 - **Persistent MCP sessions** (opt-in): cache-backed `SessionHandler`
   (`withSession('cache', ...)`) behind a flag, for clients that want
   server-initiated notifications. Default stays stateless.
@@ -61,6 +78,14 @@ Ordered by value; nothing here is scheduled until it is needed.
   concurrency from day one. "Update the meeting I just showed you" is the
   real use case, and last-write-wins corrupts a shared calendar. Phase 4
   of `docs/design/CALENDARS.md`.
+- **Sending email (SMTP)** as a separate tool family with its own design,
+  credentials and outbound risk profile — the payload half of an injection
+  attack, so it does not belong in the read-first email tools. Phase 4 of
+  `docs/design/EMAIL.md`.
+- **IMAP IDLE as an event source** for the email tool family — the same
+  worker-shaped idea as `context-loom`'s `ImapIdleListener`. Needs a
+  long-lived connection, which the stateless request model does not have.
+  Phase 4 of `docs/design/EMAIL.md`.
 - **Upstream the Symfony 8 constraint** of the php-mcp fork so the pin
   can move to a tagged release.
 - **Rector** adoption — only after coverage reaches 100% (§2.3 ordering).
