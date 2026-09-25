@@ -32,6 +32,8 @@ use function getenv;
  */
 final class CorsTest extends WebTestCase
 {
+    use McpSessionTrait;
+
     private const ORIGIN = 'http://localhost:9670';
 
     private ?string $previousResourcePolicy = null;
@@ -163,13 +165,16 @@ final class CorsTest extends WebTestCase
     public function test_actual_request_to_mcp_receives_echoed_origin_and_credentials(): void
     {
         $client = self::createClient();
-        $client->request('POST', '/mcp', server: [
-            'CONTENT_TYPE' => 'application/json',
-            'HTTP_ACCEPT' => 'application/json, text/event-stream',
+
+        // A session is required before tools/list, so handshake first and
+        // repeat the CORS-relevant headers on the actual request.
+        $sessionId = $this->initializeMcpSession($client);
+
+        $this->mcpRequest($client, $sessionId, '{"jsonrpc":"2.0","id":1,"method":"tools/list"}', [
             'HTTP_ORIGIN' => self::ORIGIN,
             'HTTP_AUTHORIZATION' => 'Bearer test-token',
             'HTTP_MCP_PROTOCOL_VERSION' => '2025-03-26',
-        ], content: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}');
+        ]);
 
         $response = $client->getResponse();
 
@@ -179,7 +184,7 @@ final class CorsTest extends WebTestCase
         self::assertVaryOrigin($response);
 
         // The JSON-RPC response must still be intact underneath the CORS decoration.
-        $data = json_decode((string) $response->getContent(), true);
+        $data = $this->jsonRpcResponse($client);
         self::assertSame('2.0', $data['jsonrpc']);
         self::assertArrayHasKey('tools', $data['result']);
     }
@@ -189,12 +194,15 @@ final class CorsTest extends WebTestCase
         // A preflight-allowed origin making a request that ends in a JSON-RPC
         // error must still get CORS headers, or the browser reports only the
         // CORS failure and hides the real error.
+        //
+        // A missing session is the cheapest genuine protocol error here, and it
+        // is the one a real browser client hits when it forgets to handshake.
         $client = self::createClient();
         $client->request('POST', '/mcp', server: [
             'CONTENT_TYPE' => 'application/json',
             'HTTP_ACCEPT' => 'application/json, text/event-stream',
             'HTTP_ORIGIN' => self::ORIGIN,
-        ], content: '{not json');
+        ], content: '{"jsonrpc":"2.0","id":9,"method":"tools/list"}');
 
         $response = $client->getResponse();
 

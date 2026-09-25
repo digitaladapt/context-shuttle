@@ -6,7 +6,98 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **MCP server library: the `php-mcp/server` fork → the official `mcp/sdk`**
+  (pinned to `0.8.1`). Upstream `php-mcp/server` has not been pushed to since
+  2025-08-09, so the project was maintaining a private fork of an abandoned
+  library to keep it installing on Symfony 8. The official SDK is that
+  project's successor — same original author, now maintained with the PHP
+  Foundation and Symfony — and is PSR-7 in / PSR-7 out instead of owning a
+  ReactPHP socket, which suits a Symfony request cycle. Full reasoning and the
+  verified API mapping: `docs/design/MCP_SDK_MIGRATION.md`.
+
+  Net effect on this codebase: `CaptureTransport`, `McpStack` and
+  `LoggingDispatcher` are **deleted** (−161 lines); `McpController` no longer
+  contains any JSON-RPC knowledge (no id handling, no error-code table, no
+  media-type negotiation).
+
+- **MCP sessions are now required.** A `tools/call` or `tools/list` sent
+  without a prior `initialize` is refused with `400` / `-32600`. v1.0.0 minted
+  a throwaway session per request, which meant it served clients that never
+  performed the handshake; that was an artifact of the old library. Sessions
+  are stored in the new `mcp_sessions` pool so the handshake spans PHP
+  requests. Point that pool at a shared backend for multi-worker deployments.
+
+- **Tool failures keep their messages.** The SDK replaces any exception other
+  than `ToolCallException` with a generic `-32603 "Error while executing
+  tool"`. Since every tool here reports actionable configuration failures by
+  throwing a plain `RuntimeException`, a
+  `ToolFailureTranslatingReferenceHandler` now performs that translation once,
+  centrally, instead of adding a new exception type to nine tools.
+
+- **Parse errors answer `200` with `-32700` in the body**, not `400`. The HTTP
+  request was fine; the JSON-RPC message was not. Transport-level failures
+  (missing session, bad method) still change the HTTP status.
+
+- **Unknown tool is `-32602` (invalid params)**, not `-32601`. `tools/call`
+  exists; the *name in its params* does not. The REST surface still answers
+  `404`.
+
 ### Added
+
+- `docs/design/MCP_SDK_VERSION_CHECK.md` — the monthly `mcp/sdk` update check,
+  and the list of SDK APIs this project depends on.
+- `mcp_sessions` cache pool for MCP session storage.
+- `tests/Integration/McpSessionTrait.php` — shared handshake helper for tests.
+- Test coverage for session enforcement, and a regression test asserting a
+  tool's own error message reaches the client.
+
+### Removed
+
+- `src/Mcp/CaptureTransport.php`, `src/Mcp/McpStack.php`,
+  `src/Mcp/LoggingDispatcher.php` — all three existed to work around the old
+  library's transport model.
+- The `php-mcp-server` VCS `repositories` entry from `composer.json`; the
+  dependency is now plain Packagist.
+
+### Added
+
+- Email read path, first slice: `list_email_folders`, `list_emails` and
+  `read_email` end to end — `directorytree/imapengine` behind an
+  `ImapClient`, the per-operation **folder gate**, page-sized listings with
+  attachment metadata, and a body fetch bounded on the wire. Verified
+  against a live Dovecot 2.4.1 instance (6 messages across 2 folders, plus
+  the HTML-only, non-ASCII, attachment and 3.4 MB fixtures).
+
+  Three things the implementation learned that the design had not
+  anticipated, all found by driving the real server rather than a mock:
+
+  - **`attachments(fetch: true)` downloads every attachment.** The helper
+    wraps each part's content in a `LazyBodyPartStream` whose `getSize()`
+    is `strlen($this->getOrFetchContent())` — so reading a *size* fetches
+    the whole part. A listing that used it turned one envelope fetch into
+    an extra `UID FETCH (BODY.PEEK[2])` per attachment. Attachment metadata
+    now comes straight off `BODYSTRUCTURE`, which already carries name,
+    type and size.
+  - **`%` is not a wildcard inside a quoted string.** The obvious way to
+    express the tool's substring search is `SUBJECT "%term%"`, and that
+    searches for a subject containing percent signs — returning nothing,
+    with no error. Dovecot substring-matches `SUBJECT`/`FROM` natively, so
+    the value goes out bare. (This corrected an assumption in the design
+    itself, which had proposed the wildcard form.)
+  - **A `Mailbox` cannot be reused across `with()` calls.** The fake-server
+    work surfaced this: `connect()` re-opens the stream and re-reads the
+    greeting, so a connection per invocation is not just the thread-safety
+    rule but a practical requirement of how the library is built.
+
+  Search values are also sent as `RawQueryValue` with hand-rolled quoting,
+  which is the fix for the design's finding 3 (plain values are converted
+  to modified UTF-7, which the server matches literally): a search for
+  `Reunión` now returns the message, where before it returned zero results
+  and no error. 84 new tests, including a scripted-server fixture
+  (`tests/Support/RespondingStream.php`) that drives the real client so the
+  wire-level behaviours are pinned rather than mocked away.
 
 - `docs/design/ROADMAP.md` now records the **decided integration roster**
   and the selection rule behind it: where a service already ships a usable

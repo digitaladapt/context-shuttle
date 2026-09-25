@@ -15,5 +15,19 @@ framework:
         #app: cache.adapter.apcu
 
         # Namespaced pools use the above "app" backend by default
-        #pools:
-            #my.dedicated.cache: null
+        pools:
+            # MCP session storage (McpServerFactory::sessionStore()).
+            #
+            # A dedicated pool rather than cache.app so sessions can be
+            # flushed, relocated to Redis, or expired on their own schedule
+            # without disturbing the application cache. The SDK requires a
+            # store that survives between requests, because the MCP handshake
+            # (`initialize` → later `tools/call`) spans at least two of them.
+            #
+            # Cache-backed storage is already the documented option for
+            # multi-worker deployments. If you switch to a shared backend, use
+            # `cache.adapter.redis` here — do not switch to a per-worker
+            # in-memory adapter, or sessions stop resolving on any worker other
+            # than the one that handled `initialize`.
+            mcp_sessions:
+                adapter: cache.adapter.filesystem
