@@ -306,6 +306,56 @@ final readonly class CalDavClient
     }
 
     /**
+     * Every VTODO in a calendar, optionally narrowed to one UID.
+     *
+     * **No `<time-range>` is sent, on purpose.** Re-testing finding 12
+     * showed the original "filtering is identical either way" result held
+     * only for tasks whose `DUE` fell inside the tested window: given tasks
+     * that straddle it, Radicale returns all five without a range and three
+     * with one, and a task with no `DUE` escapes the filter entirely.
+     * Servers therefore disagree about whether, and by which property, they
+     * filter — so the fetch asks for everything and the reader filters, which
+     * is the only shape that behaves the same everywhere.
+     *
+     * @return list<CalendarObject>
+     */
+    public function fetchTasks(CalendarInfo $calendar, ?string $uid = null): array
+    {
+        $uidFilter = '';
+
+        if (null !== $uid) {
+            $uidFilter = \sprintf(
+                '<c:prop-filter name="UID"><c:text-match collation="i;octet">%s</c:text-match></c:prop-filter>',
+                htmlspecialchars($uid, \ENT_XML1),
+            );
+        }
+
+        $body = \sprintf(
+            <<<'XML'
+                <?xml version="1.0" encoding="utf-8"?>
+                <c:calendar-query xmlns:d="DAV:" xmlns:c="%s">
+                  <d:prop>
+                    <d:getetag/>
+                    <c:calendar-data/>
+                  </d:prop>
+                  <c:filter>
+                    <c:comp-filter name="VCALENDAR">
+                      <c:comp-filter name="%s">%s</c:comp-filter>
+                    </c:comp-filter>
+                  </c:filter>
+                </c:calendar-query>
+                XML,
+            $this->namespaceCalDav(),
+            ComponentType::Task->value,
+            $uidFilter,
+        );
+
+        $xml = $this->request('REPORT', $this->url($calendar), $body, depth: '1');
+
+        return $this->collectObjects($xml, $calendar);
+    }
+
+    /**
      * Fetch specific objects by href in one round trip.
      *
      * @param list<string> $hrefs

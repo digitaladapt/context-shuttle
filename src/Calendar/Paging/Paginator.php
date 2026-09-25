@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Calendar\Paging;
 
 use App\Calendar\Domain\CalendarEvent;
+use App\Calendar\Domain\CalendarTask;
 
 /**
  * Slices a fully-materialized, ordered list of occurrences into a page.
@@ -39,6 +40,57 @@ final readonly class Paginator
             $page,
             true,
             new Cursor($last->orderKey(), $last->id),
+        );
+    }
+
+    /**
+     * Slice an ordered task list into a page.
+     *
+     * Shares the cursor encoding and the "anchor on the last row's position"
+     * rule with events, so a caller pages both tools the same way. The
+     * position is `(order key, uid)` — a task's order key already puts
+     * undated tasks last, so no special case is needed here.
+     *
+     * @param list<CalendarTask> $tasks all tasks, already ordered
+     */
+    public function pageTasks(array $tasks, int $limit, ?Cursor $cursor): Page
+    {
+        $remaining = $tasks;
+
+        if (null !== $cursor) {
+            $position = $this->position($cursor->sortKey, $cursor->id);
+            $after = [];
+            $passed = false;
+
+            foreach ($tasks as $task) {
+                if (!$passed) {
+                    if ($this->position($task->orderKey(), $task->uid) === $position) {
+                        $passed = true;
+                    }
+
+                    continue;
+                }
+
+                $after[] = $task;
+            }
+
+            $remaining = $passed ? $after : array_values(array_filter(
+                $tasks,
+                fn (CalendarTask $task): bool => $this->position($task->orderKey(), $task->uid) > $position,
+            ));
+        }
+
+        if (\count($remaining) <= $limit) {
+            return new Page(tasks: $remaining, hasMore: false, nextCursor: null);
+        }
+
+        $page = \array_slice($remaining, 0, $limit);
+        $last = $page[\count($page) - 1];
+
+        return new Page(
+            tasks: $page,
+            hasMore: true,
+            nextCursor: new Cursor($last->orderKey(), $last->uid),
         );
     }
 

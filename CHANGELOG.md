@@ -105,6 +105,28 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
   it keeps only the last of any repeated element and repeated `<response>`
   elements are how a multistatus carries its payload. Still no
   `calendar_list_tasks`, ICS, or writes.
+- Calendar **tasks** (`calendar_list_tasks`, `calendar_get_task`), Phase 2:
+  VTODO through the same contract and mapper, open by default, no date
+  range required, ordered by due date with undated tasks last. Two
+  things were settled against real task data rather than guessed at.
+  **Finding 12 is corrected**: the original result that VTODO filtering
+  behaves identically with and without `<time-range>` held only for
+  tasks whose `DUE` fell inside the tested window — with tasks that
+  straddle it, Radicale returns all five without a range and three with
+  one, and undated tasks escape the filter entirely. Tasks are now
+  fetched *without* a range and filtered client-side, the only shape
+  that behaves the same on every server. And the **YAGNI #3 cursor
+  question** is settled: the cursor anchors to `(due, id)` with undated
+  tasks last, because undated tasks are common and requiring a range
+  would exclude exactly the rows a caller most wants. Two silent bugs
+  came out of the task work, both in shared code: `Component::select()`
+  takes one name and silently ignored a second, so a TZID guard written
+  for events was checking events only and *not* tasks; and sabre coerces
+  a non-numeric `PERCENT-COMPLETE` to `0`, so a task could report 0%
+  complete having never said so. Also fixes a latent `YamlToolRegistrar`
+  bug this work exposed: a tool with no required parameters passed
+  `required: null`, which the MCP validator rejects on every call —
+  invisible until the first tool that required nothing.
 - `calendar_get_event`, closing CalDAV events: it takes either an id
   from a listing (which fetches exactly that occurrence) or a plain
   series UID (which expands the series). Both behaviours were caught

@@ -36,12 +36,21 @@ final class YamlToolRegistrar
 
         $schema = $definition->inputSchema();
 
-        /** @var array{type: 'object', properties: array<string, mixed>, required: array<string>|null} $inputSchema */
+        /** @var array{type: 'object', properties: array<string, mixed>, required?: list<string>} $inputSchema */
         $inputSchema = [
             'type' => $schema['type'],
             'properties' => $schema['properties'],
-            'required' => $schema['required'] ?? null,
         ];
+
+        // `required` is omitted rather than set to null when a tool has no
+        // required parameters. `Tool::make` accepts null, but the validator
+        // rejects it on every call with "required must be an array of
+        // strings", so the key has to be *absent*. This went unnoticed while
+        // every tool happened to declare at least one required parameter;
+        // `calendar_list_tasks` is the first with none.
+        if (isset($schema['required'])) {
+            $inputSchema['required'] = $schema['required'];
+        }
 
         $tool = Tool::make(
             name: $definition->name,

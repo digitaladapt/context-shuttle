@@ -157,6 +157,12 @@ services:
     App\Tool\Calendar\GetEventTool:
         public: true
 
+    App\Tool\Calendar\ListTasksTool:
+        public: true
+
+    App\Tool\Calendar\GetTaskTool:
+        public: true
+
     # ── Alerts ─────────────────────────────────────────────────────────
     # send_alert fans out best-effort across every enabled provider; a
     # provider is on iff its required env var is present (presence-based,

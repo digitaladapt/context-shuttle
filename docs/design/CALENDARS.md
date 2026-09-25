@@ -71,7 +71,7 @@ documentation. The ones that actually changed the design are marked ⚠️.
 | 9 | All-day events are bare `DATE` values. | Must be flagged and emitted date-only — see All-day. |
 | 10 | Calendars are discoverable only via `PROPFIND` + `resourcetype` containing `<C:calendar/>`; `displayname` returned the *path* on this server. | Discover by property, not name. `href` is the stable identifier. |
 | 11 | `calendar-multiget` (batch fetch by href) works: 2 hrefs → 2 responses. | `calendar_get_event` uses it rather than listing and filtering. |
-| 12 | VTODO filtering behaves identically with and without `<time-range>`. | Cannot assume server-side VTODO date filtering; filter client-side. |
+| 12 | ⚠️ **Corrected in Phase 2.** The original finding was that VTODO filtering behaves identically with and without `<time-range>`, verified with tasks whose `DUE` all fell inside the tested range. Re-tested against Radicale 3.8.0 with tasks that straddle the window, the server **does** filter: 5 tasks without a range, 3 with one, and the two excluded were exactly those whose `DUE` fell outside. A task with **no `DUE` at all escapes the filter** and is always returned. | Server-side VTODO filtering therefore cannot be relied on in either direction: a server may filter, may not, or may filter by a different property than we would. Tasks are fetched **without** a `<time-range>` and filtered client-side, so one code path serves every server. |
 | 13 | `symfony/http-client` **refuses `file://`**: `Unsupported scheme in "file:///…": "http" or "https" expected`. | ICS is `http(s)`-only. No filesystem fetch path, no fetch seam, no second test idiom. |
 | 14 | ⚠️ Converting an all-day `DATE` through a timezone **shifts the day**: `2026-11-01` renders as `2026-10-31` in `America/New_York`. | `DATE` values are never timezone-converted, anywhere. |
 | 15 | ⚠️ A bare `DATE` is **also a valid instant**: `new DateTimeImmutable('2026-11-01')` succeeds and yields `2026-11-01T00:00:00+00:00`. | Composite-id parsing must be regex-first with the date case tested before the instant case — a "does the tail parse?" rule silently misreads every all-day occurrence as midnight, then shifts its day (finding 14). See Composite ids. |
@@ -638,10 +638,15 @@ speculative code.
    two distinct events may. Nothing is built until ICS exists, and by then
    there is a real feed to test against — picking a key now would be
    inventing a rule with no evidence.
-3. **Task paging without a date range.** Open tasks default to no range, so
+3. **Task paging without a date range.** ~~Open tasks default to no range, so
    there is no window to anchor a cursor to. Either the cursor anchors to
    `(due, id)` with undated tasks last, or tasks grow a required range.
-   Phase 2 settles it against real task data.
+   Phase 2 settles it against real task data.~~ **Settled in Phase 2:** the
+   cursor anchors to `(due, id)`, with undated tasks last. Real task data
+   settled it — undated tasks are common (a task is a note as often as a
+   deadline), so requiring a range would exclude exactly the rows a caller
+   most wants, and anchoring on `due` with a defined position for "no due"
+   keeps the order total without one.
 
 The trade-off being taken: a speculative answer to any of these costs design
 surface now and would most likely be wrong. A design that documents the gap
