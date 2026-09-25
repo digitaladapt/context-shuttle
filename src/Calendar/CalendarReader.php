@@ -9,6 +9,7 @@ use App\Calendar\Domain\CalendarEvent;
 use App\Calendar\Domain\CalendarInfo;
 use App\Calendar\Domain\CalendarObject;
 use App\Calendar\Domain\CalendarProblem;
+use App\Calendar\Domain\CalendarTask;
 use App\Calendar\Domain\ComponentType;
 use App\Calendar\Domain\CompositeId;
 use App\Calendar\Domain\TimeZoneRule;
@@ -95,6 +96,176 @@ final readonly class CalendarReader
             'problems' => $problems,
             'calendars' => $calendars,
         ];
+    }
+
+    /**
+     * List tasks, open ones first, ordered by due date with undated last.
+     *
+     * No date range is required because "what's outstanding?" is the
+     * dominant question, and a task with no deadline is a normal thing to
+     * have — requiring a range would exclude exactly those rows. When a
+     * caller *does* pass one, it filters on `due` client-side.
+     *
+     * The fetch is deliberately made **without** a server-side
+     * `<time-range>`. Finding 12's correction: Radicale returns every task
+     * when no range is given, but filters when one is — and passes undated
+     * tasks through untouched. Since servers disagree about whether and how
+     * to filter, the only way one code path serves all of them is to fetch
+     * everything and filter here.
+     *
+     * @return array{tasks: list<CalendarTask>, page: Page, problems: list<CalendarProblem>, calendars: list<CalendarInfo>}
+     */
+    public function listTasks(
+        bool $includeCompleted = false,
+        ?string $calendar = null,
+        ?string $search = null,
+        ?DateTimeImmutable $dueFrom = null,
+        ?DateTimeImmutable $dueTo = null,
+        ?Cursor $cursor = null,
+        int $limit = 50,
+    ): array {
+        $calendars = $this->selectCalendars($calendar);
+        $tasks = [];
+        $problems = [];
+
+        foreach ($calendars as $info) {
+            foreach ($this->client->fetchTasks($info) as $object) {
+                [$mapped, $objectProblems] = $this->mapper->mapTask($object);
+
+                foreach ($mapped as $task) {
+                    $tasks[] = $task;
+                }
+
+                foreach ($objectProblems as $problem) {
+                    $problems[] = $problem;
+                }
+            }
+        }
+
+        $tasks = $this->orderTasks($tasks);
+
+        $tasks = array_values(array_filter($tasks, static function (CalendarTask $task) use ($includeCompleted): bool {
+            return $includeCompleted || !$task->isCompleted();
+        }));
+
+        if (null !== $search && '' !== trim($search)) {
+            $tasks = $this->filterTasksBySearch($tasks, trim($search));
+        }
+
+        if (null !== $dueFrom || null !== $dueTo) {
+            $tasks = $this->filterTasksByDue($tasks, $dueFrom, $dueTo);
+        }
+
+        $page = $this->paginator->pageTasks($tasks, $limit, $cursor);
+
+        $this->logProblems($problems);
+
+        return [
+            'tasks' => $page->tasks,
+            'page' => $page,
+            'problems' => $problems,
+            'calendars' => $calendars,
+        ];
+    }
+
+    /**
+     * Fetch one task by id.
+     *
+     * A task is addressed by its UID alone: unlike an event, it has no
+     * occurrence to disambiguate, so a composite id here would be noise.
+     *
+     * @return array{tasks: list<CalendarTask>, problems: list<CalendarProblem>}
+     */
+    public function getTask(string $id, ?string $calendar = null): array
+    {
+        $uid = CompositeId::parse($id)->uid;
+        $tasks = [];
+        $problems = [];
+
+        foreach ($this->selectCalendars($calendar) as $info) {
+            foreach ($this->client->fetchTasks($info, $uid) as $object) {
+                [$mapped, $objectProblems] = $this->mapper->mapTask($object);
+
+                foreach ($mapped as $task) {
+                    if ($task->uid === $uid) {
+                        $tasks[] = $task;
+                    }
+                }
+
+                foreach ($objectProblems as $problem) {
+                    $problems[] = $problem;
+                }
+            }
+        }
+
+        $this->logProblems($problems);
+
+        return ['tasks' => $this->orderTasks($tasks), 'problems' => $problems];
+    }
+
+    /**
+     * Order tasks by due date, then id — with undated tasks last.
+     *
+     * @param list<CalendarTask> $tasks
+     *
+     * @return list<CalendarTask>
+     */
+    private function orderTasks(array $tasks): array
+    {
+        usort($tasks, static function (CalendarTask $a, CalendarTask $b): int {
+            return [$a->orderKey(), $a->uid] <=> [$b->orderKey(), $b->uid];
+        });
+
+        return $tasks;
+    }
+
+    /**
+     * @param list<CalendarTask> $tasks
+     *
+     * @return list<CalendarTask>
+     */
+    private function filterTasksBySearch(array $tasks, string $needle): array
+    {
+        $needle = mb_strtolower($needle);
+
+        return array_values(array_filter($tasks, static function (CalendarTask $task) use ($needle): bool {
+            foreach ([$task->summary, $task->description] as $field) {
+                if (null !== $field && str_contains(mb_strtolower($field), $needle)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }));
+    }
+
+    /**
+     * Filter by due date, client-side.
+     *
+     * An undated task is excluded by a range, which is the only defensible
+     * reading: it has no due date to fall inside one.
+     *
+     * @param list<CalendarTask> $tasks
+     *
+     * @return list<CalendarTask>
+     */
+    private function filterTasksByDue(array $tasks, ?DateTimeImmutable $from, ?DateTimeImmutable $to): array
+    {
+        return array_values(array_filter($tasks, static function (CalendarTask $task) use ($from, $to): bool {
+            if (null === $task->due || !$task->hasDue()) {
+                return false;
+            }
+
+            // Compare instants. A date-only due is read in the deployment's
+            // timezone so it lands on the day a caller would name.
+            $due = new DateTimeImmutable($task->due, $from?->getTimezone() ?? $to?->getTimezone());
+
+            if (null !== $from && $due < $from) {
+                return false;
+            }
+
+            return null === $to || $due <= $to;
+        }));
     }
 
     /**

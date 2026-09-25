@@ -10,6 +10,7 @@ use App\Calendar\Domain\TimeZoneRule;
 use App\Calendar\Mapping\EventMapper;
 use App\Tool\Calendar\GetEventTool;
 use App\Tool\Calendar\ListEventsTool;
+use App\Tool\Calendar\ListTasksTool;
 use DateTimeImmutable;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -171,6 +172,78 @@ final class CalDavLiveTest extends TestCase
             $rendered->setTimezone($this->timeZone()->zone())->format('Y-m-d\TH:i:sP'),
             'a start must already be in the configured timezone',
         );
+    }
+
+    public function test_tasks_are_fetched_whole_and_filtered_client_side(): void
+    {
+        // The fetch deliberately sends no `<time-range>`: Radicale returns
+        // every task without one but filters when one is given, and passes
+        // undated tasks through either way, so no server-side range can be
+        // trusted to mean the same thing twice.
+        $rule = $this->timeZone();
+        $tool = new ListTasksTool($this->reader(), $rule);
+
+        $all = $tool->listTasks(include_completed: true, limit: 200);
+        $open = $tool->listTasks(limit: 200);
+
+        self::assertSame([], $all['errors'] ?? [], 'the fixture tasks should all parse');
+        self::assertGreaterThanOrEqual(\count($open['tasks']), \count($all['tasks']));
+        self::assertSame($rule->name(), $all['timezone']);
+
+        // Every task carries a due in the deployment's timezone, or a bare
+        // date, or nothing at all — never a UTC `Z`, and never converted
+        // between the two forms.
+        foreach ($all['tasks'] as $task) {
+            if (null === $task['due']) {
+                continue;
+            }
+
+            if ($task['due_is_date']) {
+                self::assertMatchesRegularExpression('/^\d{4}-\d{2}-\d{2}$/', $task['due']);
+                continue;
+            }
+
+            self::assertMatchesRegularExpression('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/', $task['due']);
+        }
+    }
+
+    public function test_a_completed_task_is_excluded_by_default_and_included_on_request(): void
+    {
+        $tool = new ListTasksTool($this->reader(), $this->timeZone());
+
+        $all = $tool->listTasks(include_completed: true, limit: 200);
+        $open = $tool->listTasks(limit: 200);
+
+        $allIds = array_column($all['tasks'], 'id');
+        $openIds = array_column($open['tasks'], 'id');
+
+        $completed = array_values(array_diff($allIds, $openIds));
+
+        if ([] === $completed) {
+            self::markTestSkipped('No completed task in the fixture calendar.');
+        }
+
+        foreach ($completed as $id) {
+            self::assertContains($id, $allIds);
+            self::assertNotContains($id, $openIds, 'a completed task must not appear by default');
+        }
+    }
+
+    public function test_a_task_round_trips_through_get_task(): void
+    {
+        $list = new ListTasksTool($this->reader(), $this->timeZone());
+        $result = $list->listTasks(include_completed: true, limit: 200);
+
+        if ([] === $result['tasks']) {
+            self::markTestSkipped('No tasks in the fixture calendar.');
+        }
+
+        $first = $result['tasks'][0];
+        $fetched = (new \App\Tool\Calendar\GetTaskTool($this->reader(), $this->timeZone()))->getTask($first['id']);
+
+        self::assertSame(1, $fetched['count']);
+        self::assertSame($first['id'], $fetched['tasks'][0]['id']);
+        self::assertSame($first['due'], $fetched['tasks'][0]['due']);
     }
 
     /**

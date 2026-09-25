@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Calendar\Paging;
 
 use App\Calendar\Domain\CalendarEvent;
+use App\Calendar\Domain\CalendarTask;
 
 /**
  * One page of a listing, plus what a caller needs to ask for the next.
@@ -16,12 +17,14 @@ use App\Calendar\Domain\CalendarEvent;
 final readonly class Page
 {
     /**
-     * @param list<CalendarEvent> $events
+     * @param list<CalendarEvent> $events events in this page, empty for a task page
+     * @param list<CalendarTask>  $tasks  tasks in this page, empty for an event page
      */
     public function __construct(
-        public array $events,
-        public bool $hasMore,
-        public ?Cursor $nextCursor,
+        public array $events = [],
+        public bool $hasMore = false,
+        public ?Cursor $nextCursor = null,
+        public array $tasks = [],
     ) {
     }
 }
