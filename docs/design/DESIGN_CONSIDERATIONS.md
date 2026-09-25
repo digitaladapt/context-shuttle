@@ -51,6 +51,46 @@ buys identical behaviour. The REST controller is a thin adapter: parse body
 → apply YAML defaults → build `CallToolRequest` → translate the JSON-RPC
 response to plain JSON.
 
+## Why integrations start by looking for someone else's MCP server
+
+MCP is now common enough that a growing number of the services worth
+connecting to **ship their own server**: Blinko's is part of the
+application, and SparkyFitness advertises "MCP server + bring your own
+LLM" as a feature. For those, the integration cost is configuration, not
+code — an API token and a URL, registered directly against the harness.
+
+A native tool in this project buys four things a foreign server does not:
+one namespace with the other tools; one structured invocation log; the
+allowlist / folder-gating patterns this project enforces on reads and
+writes; and the shared REST + OpenAPI surface. That is a real list — it is
+just not free, and it is not always worth paying. **Build a native tool
+when nothing else exists, or when those guarantees are the point.** The
+decision is recorded per integration in `ROADMAP.md`.
+
+The clearest example of the trade going the other way: Blinko already
+bundles a web-search tool, so a `web_search` tool here would be rebuilding
+a thing that already exists, merely to own it. Deferred instead.
+
+## Read and report, do not operate
+
+The integrations are deliberately *observational*. Tools may gather state
+and raise alerts; they do not restart, stop, or reconfigure running
+services. This is not a hedge about model reliability — it is about what a
+mistaken call costs and whether it can be undone.
+
+- **No container restarts or docker control.** The services these tools
+  report on run in the same compose projects a control tool would have
+  access to. A restart loop is how a reporting tool becomes the outage it
+  is reporting.
+- **No network-infrastructure access.** A Wi-Fi router and a thermostat
+  are the class of device where a wrong call removes the connection that
+  would be needed to notice and fix it — including, in the router's case,
+  the connection to the machine making the call.
+
+Where the same information can be obtained read-only (health lists, disk
+and thermal readouts, alert history), that stays on the table. Control
+does not. See the non-goal in `ROADMAP.md`.
+
 ## Rejected alternatives
 
 - **Symfony MCP bundles** — none were found for Symfony 8 at the time.

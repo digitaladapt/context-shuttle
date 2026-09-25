@@ -2,6 +2,36 @@
 
 Ordered by value; nothing here is scheduled until it is needed.
 
+## Selecting an integration: existing MCP server first
+
+Where a service already ships a usable MCP server, **use it** — either by
+registering it directly in the harness (task-loom's catalog accepts any
+streamable-HTTP MCP server) or, when the tool needs to live here, by
+mirroring it through the YAML registry. Building a native tool is for when
+there is no server, or when this project's own guarantees are the point:
+one namespace, one invocation log, folder/allowlist gating, and the shared
+REST + OpenAPI surface. **Blinko** and **SparkyFitness** are the worked
+examples: their MCP endpoints are part of the application, so the cost is
+configuration rather than code.
+
+Decided so far, with the reasoning recorded so it does not get relitigated:
+
+| Integration | Route | Notes |
+|---|---|---|
+| **Blinko** (notes, memory) | existing MCP server | Ships `searchBlinko` / `upsertBlinko` / `createComment` / … over streamable HTTP at `/mcp` with its own API token. Includes a web search tool, so a separate `web_search` tool is deferred. |
+| **SparkyFitness** (food, fitness, water, health) | existing MCP server | "MCP server + bring your own LLM" is a first-class feature of the application. |
+| **ntfy read-back** | native tool | See below — reading is wanted, touching production is not. |
+| **CardDAV contacts** | native tool | Radicale is already in use for CalDAV. See below. |
+
+The standing boundary: **read and report, do not operate.** Tools here may
+gather state and raise alerts; they do not restart, stop, or reconfigure
+running services. Two concrete exclusions, both about self-inflicted
+outages rather than distrust of the model: no **container restarts or
+docker control** anywhere, and no **network-infrastructure access** — the
+Wi-Fi router (EERO) and thermostat (Honeywell) are exactly the class of
+device where a wrong call takes out the connection everything else depends
+on, including the ability to notice and undo it.
+
 ## Near term
 
 - **Alerts tool family** (`send_alert` shipped; `ask_user` /
@@ -14,6 +44,16 @@ Ordered by value; nothing here is scheduled until it is needed.
   harness-facing status endpoint (`GET /inputs/{id}`) so a harness can
   poll for answers without LLM intervention. Design:
   `docs/design/ALERTS.md`.
+- **ntfy read-back — `list_alerts`** (the one-way alerts tool's missing
+  half): poll one or more configured ntfy topics and return recent
+  messages, so "is anything wrong?" has an answer and a machine-generated
+  alert (the thermal / storage / docker cron scripts all publish to ntfy)
+  can be read, triaged and summarized instead of paged out to a human
+  unread. Read-only against the same `NTFY_URL` / `NTFY_TOKEN` /
+  `NTFY_TOPIC` configuration the `send_alert` providers already use — the
+  topic list is the allowlist. **Explicitly not in scope: anything that
+  changes a running service.** No restarts, no docker control, no
+  infrastructure mutations; see the boundary note above.
 - **Calendar read access — CalDAV events** (`calendar_list_events`,
   `calendar_get_event`): one provider abstraction, `symfony/http-client` +
   `sabre/vobject` rather than `sabre/dav`'s client, client-side recurrence
@@ -52,6 +92,28 @@ Ordered by value; nothing here is scheduled until it is needed.
 
 ## Mid term
 
+- **Weather extension — air quality and UV**: `/air-quality` and the
+  `uv_index` daily variable come from the same Open-Meteo provider the
+  `get_weather` tool already calls, so this is extra fields on an existing
+  integration rather than a new one. Air quality in particular is the
+  current-conditions datum a health tool actually wants.
+- **CardDAV contacts** (`find_contact`, then a gated write): Radicale is
+  already the CalDAV server, so CardDAV is the same host, same Basic
+  auth, same `sabre` parsing family — a small marginal addition to
+  machinery that already exists. Read first ("is this sender known?",
+  "who is X?" — and a cheap phishing signal when a claimed sender is not
+  in the address book at all). Writes follow the same shape as the email
+  folder gate: **one configured address book is the only one the agent
+  may edit**, because multiple contact lists exist and the agent has no
+  business in the rest.
+- **Penny-track depth**: the `/api/receipts` list is only one of the
+  instance's endpoints — the dashboard exposes summary, spending by
+  category, monthly breakdown, spending over time, top businesses and
+  insights, and none of them are surfaced here yet. A
+  `get_spending_summary` tool would let a budget question be answered with
+  an aggregate instead of a caller-side sum over a transaction page.
+  (Recurring-charge detection belongs in penny-track itself; if it lands
+  there as an endpoint, this tool reads it.)
 - **Calendar tasks** (VTODO) through the same provider contract and
   mapper: `calendar_list_tasks`, `calendar_get_task`. Then the **ICS
   provider** — a plain `http(s)` `GET` (no `file://`), read-only, same
@@ -91,3 +153,10 @@ Ordered by value; nothing here is scheduled until it is needed.
 - **Rector** adoption — only after coverage reaches 100% (§2.3 ordering).
 - **Multi-file tools** (one YAML defining several tools) if a use case
   demands it; current one-file-one-tool keeps diffs reviewable.
+- **Server and network infrastructure** (docker control, container
+  restarts, Wi-Fi router, thermostat): out of scope by decision, not by
+  difficulty. A tool that can restart the router can end the connection
+  that would be used to fix it, and the same call applied to a compose
+  project takes down the services these tools report on. Observability
+  may be added where it is genuinely read-only; control is not on the
+  table.
