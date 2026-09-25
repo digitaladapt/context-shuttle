@@ -30,6 +30,13 @@ final readonly class ToolDefinition
      *     maximum?: float|int
      * }> $parameters JSON-Schema properties keyed by parameter name
      * @param array{lat: float, lon: float}|null $defaultLocation special-cased default for the Weather tool
+     * @param bool                               $requiresWrites  the tool can only exist when writes
+     *                                                            are enabled; absent from the tool
+     *                                                            list otherwise, rather than listed
+     *                                                            and refusing. A requirement rather
+     *                                                            than a permission: it says what the
+     *                                                            tool needs, and `ToolAvailability`
+     *                                                            decides whether the deployment has it.
      */
     public function __construct(
         public string $name,
@@ -37,6 +44,7 @@ final readonly class ToolDefinition
         public string $handler,
         public array $parameters,
         public ?array $defaultLocation = null,
+        public bool $requiresWrites = false,
     ) {
     }
 

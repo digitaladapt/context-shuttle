@@ -135,14 +135,13 @@ on, including the ability to notice and undo it.
   instead of a webhook, ntfy `http` actions) behind the same tool contract
   as the web-form flow, if the form proves insufficient. Phase 3 of
   `docs/design/ALERTS.md`.
-- **CalDAV writes** (create/update/delete events, then tasks) on the one
-  calendar named by `CALDAV_EDITABLE_CALENDAR`, with `etag`/`If-Match`
-  optimistic concurrency from day one. "Update the meeting I just showed
-  you" is the real use case, and last-write-wins corrupts a shared
-  calendar. The variable being unset means **no write tools are
-  registered**, and no write tool takes a `calendar` argument — the target
-  is configuration, never an argument. Phase 4 of
-  `docs/design/CALENDARS.md`.
+- **CalDAV task writes** — the half of Phase 4 that is not built. Events are
+  done: create/update/delete on the calendar named by
+  `CALDAV_EDITABLE_CALENDAR`, conditional writes throughout, occurrence-vs-
+  series decided by the id. Tasks follow the same rules and the same
+  transport; what differs is the component, the properties, and the fact that
+  a `VTODO` has no occurrence to disambiguate, so its id is a plain UID. See
+  Phase 4 of `docs/design/CALENDARS.md`.
 - **Sending email (SMTP)** as a separate tool family with its own design,
   credentials and outbound risk profile — the payload half of an injection
   attack, so it does not belong in the read-first email tools. Phase 4 of

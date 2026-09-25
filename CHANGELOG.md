@@ -146,6 +146,38 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
   (`tests/Support/RespondingStream.php`) that drives the real client so the
   wire-level behaviours are pinned rather than mocked away.
 
+- Calendar **writes**, Phase 4: `calendar_create_event`,
+  `calendar_update_event` and `calendar_delete_event`, on the single calendar
+  named by `CALDAV_EDITABLE_CALENDAR`. **Off unless configured** — while the
+  variable is empty those tools are not registered at all, so they do not
+  appear in `tools/list` and a model cannot attempt an edit the deployment
+  would refuse. No write tool takes a `calendar` parameter: the target is
+  configuration, never an argument, because a caller that could name a target
+  could name the wrong one and a bad write is not recoverable the way a bad
+  read is.
+- `readonly` now means "**these tools** can edit this row" rather than "the
+  server would allow it". A calendar the server accepts writes for — but which
+  is not the one designated — reports `readonly: true`, because these tools
+  will not touch it. Reporting the server's opinion alone would have said an
+  edit was available on every writable calendar while only one was reachable,
+  in the field whose entire purpose is to answer that question. The change is
+  a narrowing: rows only ever flip from `false` to `true`.
+- Calendar updates send `If-Match` with the version they read and creates send
+  `If-None-Match: *`, so a change made elsewhere is refused with a message
+  saying to re-read rather than silently overwritten. A `412` is reported as a
+  concurrent modification, not as a generic failure, because it is the one
+  failure with a specific remedy.
+- Editing and deleting act on **one occurrence or the whole series, taken from
+  the id**: an id from a listing (a `uid::occurrence` pair) changes that
+  occurrence by writing a `RECURRENCE-ID` override or an `EXDATE` into the
+  existing object; a plain `uid` changes or deletes the series. There is no
+  parameter for the scope — the id already carries it. "This and all future
+  occurrences" is refused rather than approximated.
+- `docs/design/CALENDAR-WRITES-FINDINGS.md`: what a live CalDAV server actually
+  does with writes, measured before any of it was built, including the two
+  findings that changed the code — a UID must never become a path segment, and
+  an object holding a moved occurrence must not be looked up by time window.
+
 - `docs/design/ROADMAP.md` now records the **decided integration roster**
   and the selection rule behind it: where a service already ships a usable
   MCP server, use it (directly from the harness, or mirrored into the YAML
