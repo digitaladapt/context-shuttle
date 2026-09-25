@@ -8,6 +8,42 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Email read path, first slice: `list_email_folders`, `list_emails` and
+  `read_email` end to end — `directorytree/imapengine` behind an
+  `ImapClient`, the per-operation **folder gate**, page-sized listings with
+  attachment metadata, and a body fetch bounded on the wire. Verified
+  against a live Dovecot 2.4.1 instance (6 messages across 2 folders, plus
+  the HTML-only, non-ASCII, attachment and 3.4 MB fixtures).
+
+  Three things the implementation learned that the design had not
+  anticipated, all found by driving the real server rather than a mock:
+
+  - **`attachments(fetch: true)` downloads every attachment.** The helper
+    wraps each part's content in a `LazyBodyPartStream` whose `getSize()`
+    is `strlen($this->getOrFetchContent())` — so reading a *size* fetches
+    the whole part. A listing that used it turned one envelope fetch into
+    an extra `UID FETCH (BODY.PEEK[2])` per attachment. Attachment metadata
+    now comes straight off `BODYSTRUCTURE`, which already carries name,
+    type and size.
+  - **`%` is not a wildcard inside a quoted string.** The obvious way to
+    express the tool's substring search is `SUBJECT "%term%"`, and that
+    searches for a subject containing percent signs — returning nothing,
+    with no error. Dovecot substring-matches `SUBJECT`/`FROM` natively, so
+    the value goes out bare. (This corrected an assumption in the design
+    itself, which had proposed the wildcard form.)
+  - **A `Mailbox` cannot be reused across `with()` calls.** The fake-server
+    work surfaced this: `connect()` re-opens the stream and re-reads the
+    greeting, so a connection per invocation is not just the thread-safety
+    rule but a practical requirement of how the library is built.
+
+  Search values are also sent as `RawQueryValue` with hand-rolled quoting,
+  which is the fix for the design's finding 3 (plain values are converted
+  to modified UTF-7, which the server matches literally): a search for
+  `Reunión` now returns the message, where before it returned zero results
+  and no error. 84 new tests, including a scripted-server fixture
+  (`tests/Support/RespondingStream.php`) that drives the real client so the
+  wire-level behaviours are pinned rather than mocked away.
+
 - `docs/design/ROADMAP.md` now records the **decided integration roster**
   and the selection rule behind it: where a service already ships a usable
   MCP server, use it (directly from the harness, or mirrored into the YAML
