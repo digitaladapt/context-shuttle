@@ -8,6 +8,7 @@ use App\Calendar\CalDav\CalDavClient;
 use App\Calendar\CalendarReader;
 use App\Calendar\Domain\TimeZoneRule;
 use App\Calendar\Mapping\EventMapper;
+use App\Calendar\Provider\CalDavProvider;
 use App\Tool\Calendar\GetEventTool;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
@@ -93,7 +94,7 @@ final class GetEventToolTest extends TestCase
 
         return new GetEventTool(
             new CalendarReader(
-                new CalDavClient($client, self::BASE, 'user', 'secret'),
+                [new CalDavProvider(new CalDavClient($client, self::BASE, 'user', 'secret'))],
                 new EventMapper($rule),
                 $rule,
             ),

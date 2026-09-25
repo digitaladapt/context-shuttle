@@ -8,6 +8,7 @@ use App\Calendar\CalDav\CalDavClient;
 use App\Calendar\CalendarReader;
 use App\Calendar\Domain\TimeZoneRule;
 use App\Calendar\Mapping\EventMapper;
+use App\Calendar\Provider\CalDavProvider;
 use App\Tool\Calendar\GetTaskTool;
 use App\Tool\Calendar\ListTasksTool;
 use InvalidArgumentException;
@@ -113,7 +114,8 @@ final class ListTasksToolTest extends TestCase
         }, self::BASE);
 
         $rule = new TimeZoneRule($zone);
-        $reader = new CalendarReader(new CalDavClient($client, self::BASE, 'u', 'p'), new EventMapper($rule), $rule);
+        $reader = new CalendarReader(
+            [new CalDavProvider(new CalDavClient($client, self::BASE, 'u', 'p'))], new EventMapper($rule), $rule);
 
         return [new ListTasksTool($reader, $rule), new GetTaskTool($reader, $rule)];
     }
@@ -352,7 +354,8 @@ final class ListTasksToolTest extends TestCase
         }, self::BASE);
 
         $rule = new TimeZoneRule('UTC');
-        $reader = new CalendarReader(new CalDavClient($client, self::BASE, 'u', 'p'), new EventMapper($rule), $rule);
+        $reader = new CalendarReader(
+            [new CalDavProvider(new CalDavClient($client, self::BASE, 'u', 'p'))], new EventMapper($rule), $rule);
         $list = new ListTasksTool($reader, $rule);
 
         $result = $list->listTasks();

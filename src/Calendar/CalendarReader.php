@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Calendar;
 
-use App\Calendar\CalDav\CalDavClient;
 use App\Calendar\Domain\CalendarEvent;
 use App\Calendar\Domain\CalendarInfo;
 use App\Calendar\Domain\CalendarObject;
@@ -17,8 +16,10 @@ use App\Calendar\Mapping\EventMapper;
 use App\Calendar\Paging\Cursor;
 use App\Calendar\Paging\Page;
 use App\Calendar\Paging\Paginator;
+use App\Calendar\Provider\CalendarProvider;
 use DateTimeImmutable;
 use Psr\Log\LoggerInterface;
+use RuntimeException;
 
 /**
  * Assembles a listing: fetch, map, order, filter, page.
@@ -32,13 +33,88 @@ use Psr\Log\LoggerInterface;
  */
 final readonly class CalendarReader
 {
+    /**
+     * @param iterable<CalendarProvider> $providers every configured source, in
+     *                                              the order their calendars should appear
+     */
     public function __construct(
-        private CalDavClient $client,
+        private iterable $providers,
         private EventMapper $mapper,
         private TimeZoneRule $timeZone,
         private Paginator $paginator = new Paginator(),
         private ?LoggerInterface $logger = null,
     ) {
+        $this->unboundedFrom = new DateTimeImmutable('-30 years', $timeZone->zone());
+        $this->unboundedTo = new DateTimeImmutable('+30 years', $timeZone->zone());
+    }
+
+    /**
+     * A window wide enough to mean "the caller has not narrowed this".
+     *
+     * A task listing requires no date range, and both sources ignore these
+     * bounds for tasks anyway — a feed cannot be asked for part of itself,
+     * and a CalDAV server's VTODO filtering cannot be trusted to mean the
+     * same thing twice. Passing a real span rather than nothing keeps the
+     * provider contract one shape, and the reader does the filtering.
+     */
+    private DateTimeImmutable $unboundedFrom;
+    private DateTimeImmutable $unboundedTo;
+
+    /**
+     * Every calendar, paired with the source that owns it.
+     *
+     * Sources are asked in order, so a deployment's calendar list is stable
+     * across calls — which is what makes a cursor taken from one page still
+     * meaningful on the next. Resolving the owner here, once, means a lookup
+     * never re-enumerates (and so never re-fetches discovery) just to find
+     * out where a calendar came from.
+     *
+     * @return list<array{calendar: CalendarInfo, provider: CalendarProvider}>
+     */
+    private function allCalendars(): array
+    {
+        $calendars = [];
+
+        $usable = 0;
+
+        foreach ($this->providers as $provider) {
+            // A source with no URL cannot answer anything, so it is skipped
+            // rather than carried. This has to happen here rather than at
+            // compile time: an env-backed container parameter is still its
+            // placeholder string while the container is being built.
+            if (!$provider->isConfigured()) {
+                continue;
+            }
+
+            ++$usable;
+
+            foreach ($provider->listCalendars() as $info) {
+                $calendars[] = ['calendar' => $info, 'provider' => $provider];
+            }
+        }
+
+        // Skipping *one* unset source is right — a deployment may use only
+        // CalDAV, or only a feed. Skipping *all* of them is not: the tools
+        // are simply unusable, and an empty listing would look like a
+        // calendar with nothing on it rather than like a deployment nobody
+        // configured. Fail loudly and name both variables.
+        if (0 === $usable) {
+            throw new RuntimeException('No calendar source is configured. Set CALDAV_URL for a CalDAV server, or ICS_URL for a calendar feed, in .env.local (see .env.example).');
+        }
+
+        return $calendars;
+    }
+
+    /**
+     * Just the calendars, without their sources.
+     *
+     * @param list<array{calendar: CalendarInfo, provider: CalendarProvider}> $paired
+     *
+     * @return list<CalendarInfo>
+     */
+    private function calendarsOnly(array $paired): array
+    {
+        return array_map(static fn (array $entry): CalendarInfo => $entry['calendar'], $paired);
     }
 
     /**
@@ -62,12 +138,15 @@ final readonly class CalendarReader
         ?Cursor $cursor = null,
         int $limit = 50,
     ): array {
-        $calendars = $this->selectCalendars($calendar);
+        $selected = $this->selectPairs($calendar);
+        $calendars = $this->calendarsOnly($selected);
         $events = [];
         $problems = [];
 
-        foreach ($calendars as $info) {
-            foreach ($this->client->fetchByTimeRange($info, $from, $to, ComponentType::Event) as $object) {
+        foreach ($selected as $entry) {
+            $info = $entry['calendar'];
+
+            foreach ($entry['provider']->fetch($info, $from, $to, ComponentType::Event) as $object) {
                 [$mapped, $objectProblems] = $this->mapper->map($object, $from, $to);
 
                 foreach ($mapped as $event) {
@@ -124,12 +203,15 @@ final readonly class CalendarReader
         ?Cursor $cursor = null,
         int $limit = 50,
     ): array {
-        $calendars = $this->selectCalendars($calendar);
+        $selected = $this->selectPairs($calendar);
+        $calendars = $this->calendarsOnly($selected);
         $tasks = [];
         $problems = [];
 
-        foreach ($calendars as $info) {
-            foreach ($this->client->fetchTasks($info) as $object) {
+        foreach ($selected as $entry) {
+            $info = $entry['calendar'];
+
+            foreach ($entry['provider']->fetch($info, $this->unboundedFrom, $this->unboundedTo, ComponentType::Task) as $object) {
                 [$mapped, $objectProblems] = $this->mapper->mapTask($object);
 
                 foreach ($mapped as $task) {
@@ -182,8 +264,10 @@ final readonly class CalendarReader
         $tasks = [];
         $problems = [];
 
-        foreach ($this->selectCalendars($calendar) as $info) {
-            foreach ($this->client->fetchTasks($info, $uid) as $object) {
+        foreach ($this->selectPairs($calendar) as $entry) {
+            $info = $entry['calendar'];
+
+            foreach ($entry['provider']->fetchByUid($info, $uid, ComponentType::Task) as $object) {
                 [$mapped, $objectProblems] = $this->mapper->mapTask($object);
 
                 foreach ($mapped as $task) {
@@ -300,23 +384,25 @@ final readonly class CalendarReader
         ?array $calendars = null,
     ): array {
         $composite = CompositeId::parse($id);
-        $calendars ??= $this->selectCalendars($calendar);
+        $selected = $calendars ?? $this->selectPairs($calendar);
 
         $events = [];
         $problems = [];
 
-        foreach ($calendars as $info) {
+        foreach ($selected as $entry) {
+            $info = $entry['calendar'];
+
             if ($composite->hasOccurrence) {
                 // The id names an instant or a date, so the query can be
                 // narrowed to that occurrence before anything is fetched.
-                $objects = $this->client->fetchByTimeRange(
+                $objects = $entry['provider']->fetch(
                     $info,
                     $this->occurrenceWindow($composite),
                     $this->occurrenceWindowEnd($composite),
                     ComponentType::Event,
                 );
             } else {
-                $objects = $this->client->fetchByUid($info, $composite->uid, ComponentType::Event);
+                $objects = $entry['provider']->fetchByUid($info, $composite->uid, ComponentType::Event);
             }
 
             foreach ($objects as $object) {
@@ -411,15 +497,23 @@ final readonly class CalendarReader
     }
 
     /**
-     * The expansion window for a lookup: the occurrence narrows it, a plain
-     * UID falls back to the caller's bounds.
-     */
-    /**
+     * The calendars matching a filter, without their sources.
+     *
      * @return list<CalendarInfo>
      */
     public function selectCalendars(?string $filter): array
     {
-        $calendars = $this->client->discoverCalendars();
+        return $this->calendarsOnly($this->selectPairs($filter));
+    }
+
+    /**
+     * The calendars matching a filter, each paired with its source.
+     *
+     * @return list<array{calendar: CalendarInfo, provider: CalendarProvider}>
+     */
+    private function selectPairs(?string $filter): array
+    {
+        $calendars = $this->allCalendars();
 
         if (null === $filter || '' === trim($filter)) {
             return $calendars;
@@ -428,11 +522,11 @@ final readonly class CalendarReader
         $wanted = trim($filter);
         $matched = [];
 
-        foreach ($calendars as $info) {
+        foreach ($calendars as $entry) {
             // `href` is the stable identifier; a display name is a
             // convenience, and on some servers it is not even a name.
-            if ($info->href === $wanted || $info->name === $wanted) {
-                $matched[] = $info;
+            if ($entry['calendar']->href === $wanted || $entry['calendar']->name === $wanted) {
+                $matched[] = $entry;
             }
         }
 
