@@ -7,6 +7,10 @@ parameters:
     env(PENNYTRACK_API_KEY): ''
     env(VITALPULSE_URL): ''
     env(VITALPULSE_API_KEY): ''
+    env(CALDAV_URL): ''
+    env(CALDAV_USERNAME): ''
+    env(CALDAV_PASSWORD): ''
+    env(CALDAV_CALENDARS): ''
     env(NTFY_URL): ''
     env(NTFY_TOPIC): ''
     env(NTFY_TOKEN): ''
@@ -22,6 +26,22 @@ parameters:
     # Vital-pulse tool configuration, same pattern as penny-track above.
     vitalpulse_url: '%env(string:default::VITALPULSE_URL)%'
     vitalpulse_api_key: '%env(string:default::VITALPULSE_API_KEY)%'
+
+    # Calendar tool configuration. CALDAV_URL is NOT probed at boot: a
+    # calendar server being down must never stop context-shuttle from
+    # starting, so the failure belongs at invocation time, with a message
+    # naming the env var. CALDAV_PASSWORD may also live in the secrets
+    # vault (bin/console secrets:set CALDAV_PASSWORD).
+    caldav_url: '%env(string:default::CALDAV_URL)%'
+    caldav_username: '%env(string:default::CALDAV_USERNAME)%'
+    caldav_password: '%env(string:default::CALDAV_PASSWORD)%'
+    caldav_calendars: '%env(string:default::CALDAV_CALENDARS)%'
+
+    # TZ is the deployment's timezone: every timestamp the calendar tools
+    # emit is rendered in it, and their date inputs are read in it. An
+    # invalid value fails loudly at boot rather than silently falling
+    # back to UTC, because a wrong TZ mis-renders every event.
+    calendar_timezone: '%env(string:default::TZ)%'
 
     # Alerts tool configuration (send_alert). Channels are enabled by
     # presence: NTFY_TOPIC turns ntfy on, DISCORD_WEBHOOK_URL turns
@@ -110,6 +130,24 @@ services:
         arguments:
             $baseUrl: '%vitalpulse_url%'
             $apiKey: '%vitalpulse_api_key%'
+
+    # ── Calendar ────────────────────────────────────────────────────────
+    App\Calendar\Domain\TimeZoneRule:
+        arguments:
+            $timeZone: '%calendar_timezone%'
+
+    App\Calendar\CalDav\CalDavClient:
+        arguments:
+            $configuredBaseUrl: '%caldav_url%'
+            $username: '%caldav_username%'
+            $password: '%caldav_password%'
+
+    App\Calendar\CalendarReader:
+        arguments:
+            $logger: '@monolog.logger.mcp_invocation'
+
+    App\Tool\Calendar\ListEventsTool:
+        public: true
 
     # ── Alerts ─────────────────────────────────────────────────────────
     # send_alert fans out best-effort across every enabled provider; a
