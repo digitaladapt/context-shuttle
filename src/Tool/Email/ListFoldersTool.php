@@ -7,6 +7,7 @@ namespace App\Tool\Email;
 use App\Email\Domain\MailFolder;
 use App\Email\EmailReader;
 use App\Email\Imap\ImapConnectionFactory;
+use App\Email\MoveDestination;
 use RuntimeException;
 
 /**
@@ -31,6 +32,7 @@ final readonly class ListFoldersTool
     public function __construct(
         private EmailReader $reader,
         private ImapConnectionFactory $connection,
+        private MoveDestination $destinations,
     ) {
     }
 
@@ -53,6 +55,11 @@ final readonly class ListFoldersTool
                 $result['folders'],
             ),
             'count' => \count($result['folders']),
+            // Which named destinations exist, so a caller can see that
+            // `trash` is unavailable rather than discovering it by being
+            // refused — the same "discover the boundary without tripping it"
+            // job this tool does for folders.
+            'move_destinations' => $this->destinations->configuredNames(),
         ];
 
         // A configured folder that matched nothing is a deployment mistake

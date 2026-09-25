@@ -46,6 +46,25 @@ final class SearchValue
     }
 
     /**
+     * A `HEADER` search term, which takes *two* arguments.
+     *
+     * RFC 3501 spells this `HEADER <field-name> <string>`, and that is not
+     * expressible through the query builder's `where($key, $value)` — one
+     * call emits one `KEY value` pair, so two calls produce
+     * `HEADER "field" HEADER "value"`, which the server rejects with
+     * "Unexpected string as search key".
+     *
+     * Verified against Dovecot: `HEADER Message-ID "<id>"` matches the
+     * message and is case-insensitive in both the field name and the value,
+     * and it is the only way to find a message by an identifier that
+     * survives a move (its UID does not).
+     */
+    public static function header(string $field, string $value): RawQueryValue
+    {
+        return new RawQueryValue(self::quote($field)->value.' '.self::quote($value)->value);
+    }
+
+    /**
      * Escape a value for a quoted string, per RFC 3501 §4.3.
      *
      * `\` must be escaped before `"` or the backslash doubles incorrectly.

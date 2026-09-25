@@ -171,6 +171,74 @@ final readonly class EmailReader
     }
 
     /**
+     * Tag or untag one message, from a taggable folder.
+     *
+     * The gate runs first, so an ungated folder is refused before the
+     * connection is even opened — a refusal must not touch the network.
+     * Nothing about the tag itself is checked here: that is
+     * {@see TagName}'s job, and it runs in the tool before this
+     * is reached. Keeping the two apart means the grammar rule cannot be
+     * bypassed by a caller reaching the reader directly.
+     *
+     * @return list<string> the message's tags, re-read from the server
+     */
+    public function setTag(string $folder, int $uid, string $tag, bool $remove): array
+    {
+        $this->gate->assertAllowed(FolderGate::OPERATION_TAG, $folder);
+
+        return $this->client->setTag($folder, $uid, $tag, $remove);
+    }
+
+    /**
+     * Mark one message read or unread, from a markable folder.
+     *
+     * @return bool the `seen` state, re-read from the server
+     */
+    public function setSeen(string $folder, int $uid, bool $seen): bool
+    {
+        $this->gate->assertAllowed(FolderGate::OPERATION_MARK, $folder);
+
+        return $this->client->setSeen($folder, $uid, $seen);
+    }
+
+    /**
+     * Move one message, checking *both* allowlists.
+     *
+     * The source and target checks are separate on purpose: a deployment can
+     * allow "file things out of INBOX" without allowing "pull anything out
+     * of Archive". The target is checked against the folder the move would
+     * actually land in — the resolved destination — not against the
+     * destination *name*, so `archive` is only permitted if the folder
+     * `IMAP_ARCHIVE_FOLDER` names is itself a permitted target. That matters
+     * because otherwise two configurations could disagree, and the one that
+     * is easier to forget would be the one that wins.
+     *
+     * @return array{uid: ?int, to_folder: string, tags: list<string>}
+     */
+    public function moveMessage(string $folder, int $uid, string $resolvedTarget, string $destinationName): array
+    {
+        $this->gate->assertAllowed(FolderGate::OPERATION_MOVE_FROM, $folder);
+
+        // The named destinations (`trash`, `archive`) are configured by the
+        // operator for that purpose, so they answer to their own variable
+        // rather than to `IMAP_MOVE_TARGET_FOLDERS` — which is what the
+        // design means by "each destination class is separately configured".
+        // `folder` is the escape hatch, and is the one that must also be a
+        // permitted target.
+        if (MoveDestination::FOLDER === $destinationName) {
+            $this->gate->assertAllowed(FolderGate::OPERATION_MOVE_TO, $resolvedTarget);
+        }
+
+        $observed = $this->client->moveMessage($folder, $uid, $resolvedTarget);
+
+        if (null === $observed) {
+            throw new MoveNotObserved($folder, $resolvedTarget, $uid);
+        }
+
+        return $observed;
+    }
+
+    /**
      * Senders/recipients as DTOs.
      *
      * @param list<string> $values

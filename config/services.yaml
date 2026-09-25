@@ -126,6 +126,8 @@ services:
             # scalar constructors are not autowirable by design.
             - '../src/Email/Domain/'
             - '../src/Email/FolderNotAllowedException.php'
+            - '../src/Email/MoveNotObserved.php'
+            - '../src/Email/TagName.php'
 
     # ── Controllers ────────────────────────────────────────────────────
     App\Mcp\McpController:
@@ -247,6 +249,15 @@ services:
         arguments:
             $logger: '@monolog.logger.mcp_invocation'
 
+    # Named move destinations, resolved from configuration. Not a service
+    # with behaviour — it is the answer to "where does `trash` point", and
+    # unset means the destination does not exist.
+    App\Email\MoveDestination:
+        arguments:
+            $trashFolder: '%imap_trash_folder%'
+            $archiveFolder: '%imap_archive_folder%'
+            $deleteFolder: '%imap_delete_folder%'
+
     App\Tool\Email\ListFoldersTool:
         public: true
 
@@ -254,6 +265,15 @@ services:
         public: true
 
     App\Tool\Email\ReadEmailTool:
+        public: true
+
+    App\Tool\Email\TagEmailTool:
+        public: true
+
+    App\Tool\Email\MarkEmailTool:
+        public: true
+
+    App\Tool\Email\MoveEmailTool:
         public: true
 
     App\Tool\Alerts\NtfyProvider:

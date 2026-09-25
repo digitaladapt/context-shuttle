@@ -6,6 +6,53 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Email write path: `tag_email`, `mark_email_read` / `mark_email_unread` and
+  `move_email`, completing the family. All four are gated by their own folder
+  allowlist and refused before a connection opens; the source and target lists
+  for a move are separate checks, so a deployment can allow "file things out of
+  INBOX" without allowing "pull anything out of Archive".
+
+  **There is no delete, and that is now structural.** `move_email`'s `trash`
+  destination resolves to a configured folder (`IMAP_TRASH_FOLDER`, or
+  `IMAP_DELETE_FOLDER` which wins when both are set), so the closest thing to a
+  delete is a move a human can undo. Verified by intercepting the wire across a
+  full write session: zero outbound `EXPUNGE` commands, with the only `EXPUNGE`
+  in the log being the server's own notice that `UID MOVE` relocated the source
+  copy.
+
+  **`tag_email` cannot set a system flag.** The library's `flag()` does no
+  validation — `flag('\Deleted', '+')` sets `\Deleted` (finding 23) — so without
+  a guard the tagging tool would be a second, ungated path to the delete flag,
+  reachable without `IMAP_MOVE_SOURCE_FOLDERS`. `TagName` refuses anything
+  starting with a backslash, and its grammar is anchored with `\z` rather than
+  `$`: PCRE's `$` also matches before a trailing newline, so `/^[a-z]+$/` accepts
+  `"tag\n"` — which would put a newline inside a `STORE` command line. That hole
+  was found by a test, not by review.
+
+  Three further things the implementation learned, all verified against the live
+  Dovecot instance:
+
+  - **`move()` always returns `NULL`** (finding 26, and it is not a server
+    quirk — `getUidFromCopy()` parses the tagged response while Dovecot reports
+    `COPYUID` in an untagged one). `move_email` verifies by observation instead:
+    it reads the `Message-ID` before the move and searches the destination
+    afterwards, which is what the design already asked for. A move that cannot be
+    observed raises rather than reporting `moved: true`.
+  - **`flag()` and `move()` both take an `$expunge` argument** that runs a
+    mailbox-wide `EXPUNGE` (finding 27). Neither is ever passed.
+  - **`HEADER` takes two arguments** — `HEADER <field> <string>` — which the
+    query builder cannot express through two `where()` calls (it emits
+    `HEADER "field" HEADER "value"`, which the server rejects). Built by hand in
+    `SearchValue::header()`.
+
+  Also fixed a defect in the Phase 1 test harness that had been hiding a real
+  bug (finding 28): the scripted server matched `UID FETCH` by substring, so
+  `find(99999)` was answered by a reply written for uid 1 — and the code under
+  test tagged the *wrong message* and reported success. The fixture now only
+  answers for ids it was told exist. 49 new tests.
+
 ### Changed
 
 - **MCP server library: the `php-mcp/server` fork → the official `mcp/sdk`**
