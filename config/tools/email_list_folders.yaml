@@ -1,0 +1,22 @@
+# Email folders tool — where this deployment is allowed to work.
+# Requires IMAP_HOST, IMAP_USERNAME and IMAP_PASSWORD. Both REST
+# (POST /tools/list_email_folders) and MCP (tools/call list_email_folders)
+# invoke the same handler.
+#
+# The description is what a model reads first. It deliberately names no
+# provider vocabulary: the source is an implementation detail, and naming it
+# would invite a caller to branch on it.
+name: list_email_folders
+description: >
+  List the mail folders this deployment may work with, and what it is
+  allowed to do in each: readable (read its messages), tagging (add or
+  remove tags on its messages), markable (change its unread state),
+  movable_from (move messages out of it) and move_target (move messages
+  into it). Call this before attempting anything in a folder you have not
+  seen named in a previous result — folders not listed here are not
+  permitted at all, and an attempt to use one fails rather than silently
+  doing nothing. Folders that are neither readable nor writable are
+  omitted. The message_count and unread_count fields reflect the whole
+  folder, not a page.
+handler: App\Tool\Email\ListFoldersTool::listEmailFolders
+parameters: {}
