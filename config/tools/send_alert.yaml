@@ -1,0 +1,48 @@
+# Send-alert tool — one-way notifications through every enabled provider
+# (ntfy, Discord webhook). Channels are enabled by config presence:
+# NTFY_TOPIC enables ntfy; DISCORD_WEBHOOK_URL enables Discord. Both
+# REST (POST /tools/send_alert) and MCP (tools/call send_alert) invoke
+# the same handler.
+name: send_alert
+description: >
+  Send a one-way alert (a push notification) to the configured recipient
+  over every enabled channel (ntfy, Discord webhook). Use it to reach a
+  human outside the current conversation — "hey boss, the thing is
+  done" — rather than for chat output. Returns a per-channel delivery
+  report. The optional link becomes the notification's click action and
+  its destination is shown in the notification text. Configure channels
+  via the NTFY_TOPIC and/or DISCORD_WEBHOOK_URL environment variables;
+  with neither set, the tool fails with a clear message.
+handler: App\Tool\Alerts\AlertTool::sendAlert
+parameters:
+  title:
+    type: string
+    description: 'Short headline, up to 200 characters. E.g. "CI run finished".'
+    required: true
+  body:
+    type: string
+    description: 'Optional detail (markdown-ish), up to 4000 characters.'
+    required: false
+  priority:
+    type: integer
+    description: 'How much it can interrupt: 1 FYI, 2 routine, 3 normal (default), 4 important, 5 urgent (may mention the recipient).'
+    required: false
+    default: 3
+    minimum: 1
+    maximum: 5
+  tags:
+    type: array
+    description: 'Optional labels, up to 8 (e.g. ["ci", "done"]).'
+    required: false
+    items:
+      type: string
+  link:
+    type: string
+    description: 'Optional http(s) URL to open when the notification is tapped; its destination is shown in the notification text.'
+    required: false
+    pattern: '^https?://'
+  link_label:
+    type: string
+    description: 'Optional display label for the link. Default: "Open".'
+    required: false
+    default: Open

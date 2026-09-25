@@ -149,6 +149,16 @@ All configuration via environment variables — see `.env.example`. Key vars:
 | `MCP_SERVER_NAME` | `context-shuttle` | MCP serverInfo name |
 | `MCP_SERVER_VERSION` | `1.0.0` | MCP serverInfo version |
 | `CORS_RESOURCE_POLICY` | `same-site` | `Cross-Origin-Resource-Policy` header: `same-site`, `same-origin`, or `cross-origin` |
+| `PENNYTRACK_URL` / `PENNYTRACK_API_KEY` | empty | Enable the `get_transactions` tool |
+| `VITALPULSE_URL` / `VITALPULSE_API_KEY` | empty | Enable the `get_health_logs` tool |
+| `NTFY_TOPIC` | empty | Enable the ntfy channel of `send_alert` |
+| `NTFY_URL` / `NTFY_TOKEN` | `https://ntfy.sh` / empty | Self-hosted ntfy server and access token |
+| `DISCORD_WEBHOOK_URL` | empty | Enable the Discord channel of `send_alert` |
+| `DISCORD_MENTION_USER_ID` | empty | User mentioned by priority-5 alerts only |
+
+Alert channels are enabled by presence: set `NTFY_TOPIC`, `DISCORD_WEBHOOK_URL`,
+or both — every enabled channel receives every alert, and `send_alert` reports
+delivery per channel.
 
 ## Development
 

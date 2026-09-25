@@ -8,6 +8,20 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`send_alert` tool (alerts Phase 0)**: one-way notifications through
+  every enabled provider — ntfy and Discord webhooks behind one
+  `AlertProvider` interface, each enabled by config presence
+  (`NTFY_TOPIC`, `DISCORD_WEBHOOK_URL`; both set means both receive).
+  Best-effort fan-out with an isolated attempt per provider and a
+  per-channel delivery report in the result; the tool errors only when
+  nothing is configured or nothing anywhere delivered. Includes the
+  5-level `Priority` model (ntfy priority headers, Discord embed
+  colours, `@user` mention only at level 5 with Discord's
+  `allowed_mentions` pinned so `@everyone`/`@here` can never fire), the
+  shared bounded visible-link formatter (rightmost-50 domain,
+  leftmost-50 path, bold domain, query/fragment dropped), and full
+  MCP + REST + OpenAPI registration. Self-hosted ntfy (custom
+  `NTFY_URL`, optional `NTFY_TOKEN`) is a first-class case.
 - `docs/design/ALERTS.md`: design draft for the alerts tool family —
   `send_alert` (one-way, ntfy + Discord webhook providers behind one
   interface, both enabled by config presence — mix and match, incl.
@@ -20,6 +34,8 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
   with a per-provider delivery report, and a harness-facing short-poll
   status endpoint for polling without LLM intervention. Planning only;
   no code yet.
+  Phase 0 (`send_alert`) is now implemented (see above); Phases 1–2
+  (interactive requests) remain planning only.
 - `docs/design/CALENDARS.md`: design draft for calendar read access —
   CalDAV events first (`calendar_list_events`, `calendar_get_event`),
   then tasks, then an ICS provider, then CalDAV writes. Written against a
@@ -63,7 +79,6 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
   it keeps only the last of any repeated element and repeated `<response>`
   elements are how a multistatus carries its payload. Still no
   `calendar_get_event`, `calendar_list_tasks`, ICS, or writes.
-
 
 ### Changed
 
