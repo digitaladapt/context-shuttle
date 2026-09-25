@@ -8,6 +8,32 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `docs/design/ROADMAP.md` now records the **decided integration roster**
+  and the selection rule behind it: where a service already ships a usable
+  MCP server, use it (directly from the harness, or mirrored into the YAML
+  registry) — **Blinko** and **SparkyFitness** are configuration rather
+  than code, which is why Blinko's bundled web-search tool also removes a
+  planned `web_search` from this project's backlog. Native tools are for
+  what has no server: **ntfy read-back** (`list_alerts` — the same topics
+  the `send_alert` providers publish to, read-only, so "is anything
+  wrong?" finally has an answer) and **CardDAV contacts** (Radicale is
+  already serving the CalDAV side; one configured address book is the only
+  one the agent may edit, because multiple contact lists exist). Also
+  queued: **air quality + UV** as extra fields on the existing Open-Meteo
+  weather tool, and **penny-track dashboards** (`get_spending_summary` —
+  the instance exposes summary / by-category / monthly / over-time /
+  top-businesses / insights endpoints that nothing here surfaces yet, and
+  "/api/receipts" will feel like the whole instance until they are
+  reachable).
+- `docs/design/DESIGN_CONSIDERATIONS.md`: a section on **why integration
+  work starts by looking for someone else's MCP server**, and on the
+  project-wide boundary that follows from it — **read and report, do not
+  operate.** No container restarts or docker control, no Wi-Fi router or
+  thermostat access: a tool that can restart the router can also end the
+  connection needed to fix it, and the same call against a compose project
+  takes down the services these tools exist to report on. Recorded as an
+  explicit non-goal in the ROADMAP so it is not reopened as a feature
+  request later.
 - **`send_alert` tool (alerts Phase 0)**: one-way notifications through
   every enabled provider — ntfy and Discord webhooks behind one
   `AlertProvider` interface, each enabled by config presence
