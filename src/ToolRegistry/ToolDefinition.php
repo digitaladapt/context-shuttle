@@ -43,7 +43,7 @@ final readonly class ToolDefinition
     /**
      * JSON Schema (draft 2020-12 style object schema) for the tool input.
      *
-     * Consumed directly by php-mcp/server's manual registration and by the
+     * Consumed directly by the MCP SDK's manual tool registration and by the
      * REST layer's validation; also the source for the OpenAPI requestBody.
      *
      * @return array{type: 'object', properties: array<string, mixed>, additionalProperties: false, required?: non-empty-list<string>}
