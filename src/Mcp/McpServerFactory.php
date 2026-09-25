@@ -4,78 +4,108 @@ declare(strict_types=1);
 
 namespace App\Mcp;
 
-use App\ToolRegistry\ToolRegistry;
-use PhpMcp\Schema\Implementation;
-use PhpMcp\Schema\ServerCapabilities;
-use PhpMcp\Server\Configuration;
-use PhpMcp\Server\Protocol;
-use PhpMcp\Server\Registry;
-use PhpMcp\Server\Session\ArraySessionHandler;
-use PhpMcp\Server\Session\SessionManager;
-use PhpMcp\Server\Session\SubscriptionManager;
+use Mcp\Capability\Registry\ReferenceHandler;
+use Mcp\Server;
+use Mcp\Server\Session\Psr16SessionStore;
+use Mcp\Server\Session\SessionManager;
+use Psr\Cache\CacheItemPoolInterface;
 use Psr\Container\ContainerInterface;
+use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\LoggerInterface;
-use React\EventLoop\Loop;
+use Symfony\Component\Cache\Psr16Cache;
 
 /**
- * Assembles the php-mcp/server Protocol + Dispatcher stack for use inside
- * the Symfony request cycle (no ReactPHP socket server, no event loop run).
+ * Assembles the official MCP SDK's server for use inside the Symfony request
+ * cycle.
  *
- * The Protocol is transport-agnostic: our McpController feeds it messages,
- * and a per-request CaptureTransport captures its response.
+ * Unlike the library this replaces, the SDK does not own a socket and does not
+ * run an event loop: `Server::run()` takes a PSR-7 request-bearing transport
+ * and returns a PSR-7 response. The Symfony controller supplies the request and
+ * sends the response, which is why there is no transport code in this class.
+ *
+ * Sessions are the one piece of state the SDK expects to outlive a request.
+ * They are backed by a dedicated cache pool rather than an in-memory store,
+ * because the handshake (`initialize` → later `tools/call`) legitimately spans
+ * two PHP requests, under FrankenPHP as much as under any other SAPI.
+ *
+ * The pool is built once and shared, so every call site sees the same store.
  */
 final class McpServerFactory
 {
+    /** One hour, matching the SDK's documented default. */
+    private const SESSION_TTL_SECONDS = 3600;
+
+    private ?Psr16SessionStore $sessionStore = null;
+
+    /**
+     * @param CacheItemPoolInterface $sessionPool the `mcp_sessions` cache pool
+     *                                            (PSR-6; adapted for the SDK below)
+     */
     public function __construct(
-        private ToolRegistry $toolRegistry,
-        private ContainerInterface $container,
-        private LoggerInterface $logger,
-        private LoggerInterface $invocationLogger,
-        private string $serverName,
-        private string $serverVersion,
+        private readonly YamlToolRegistrar $registrar,
+        private readonly ContainerInterface $container,
+        private readonly LoggerInterface $logger,
+        private readonly EventDispatcherInterface $eventDispatcher,
+        private readonly CacheItemPoolInterface $sessionPool,
+        private readonly string $serverName,
+        private readonly string $serverVersion,
     ) {
     }
 
-    public function build(): McpStack
+    public function build(): Server
     {
-        $capabilities = ServerCapabilities::make(
-            tools: true,
-            toolsListChanged: false,
-            resources: false,
-            prompts: false,
-            logging: false,
+        $builder = Server::builder()
+            ->setServerInfo($this->serverName, $this->serverVersion)
+            ->setInstructions(
+                'Tools are defined by YAML files in config/tools/. '
+                .'Each tool is available via MCP and REST with identical schemas.',
+            )
+            // The container is what makes handler resolution work for services
+            // with constructor dependencies (CalDavClient, HTTP clients, YAML
+            // parameters) rather than only for classes with no constructor.
+            ->setContainer($this->container)
+            ->setLogger($this->logger)
+            ->setEventDispatcher($this->eventDispatcher)
+            // Keeps tool-authored error messages in front of the caller; see
+            // ToolFailureTranslatingReferenceHandler for why the SDK needs help.
+            ->setReferenceHandler(new ToolFailureTranslatingReferenceHandler(
+                new ReferenceHandler($this->container),
+            ))
+            ->setSession($this->sessionStore());
+
+        $this->registrar->declareOn($builder);
+
+        return $builder->build();
+    }
+
+    /**
+     * Backing store for MCP sessions.
+     *
+     * The SDK's `Psr16SessionStore` wants PSR-16, while a Symfony cache pool is
+     * PSR-6, so the pool is adapted here rather than at every call site.
+     *
+     * The pool itself is a named one (`mcp_sessions`) rather than `cache.app`,
+     * so sessions can be flushed, relocated to Redis, or expired on their own
+     * schedule without disturbing the application cache.
+     */
+    public function sessionStore(): Psr16SessionStore
+    {
+        return $this->sessionStore ??= new Psr16SessionStore(
+            cache: new Psr16Cache($this->sessionPool),
+            prefix: 'mcp-session-',
+            // Bounds the cache, not the protocol: the SDK's own SessionManager
+            // expiry is what decides protocol-level session lifetime.
+            ttl: self::SESSION_TTL_SECONDS,
         );
+    }
 
-        $loop = Loop::get();
-
-        $configuration = new Configuration(
-            serverInfo: Implementation::make($this->serverName, $this->serverVersion),
-            capabilities: $capabilities,
-            logger: $this->logger,
-            loop: $loop,
-            cache: null,
-            container: $this->container,
-            paginationLimit: 100,
-            instructions: 'Tools are defined by YAML files in config/tools/. Each tool is available via MCP and REST with identical schemas.',
-        );
-
-        $sessionManager = new SessionManager(new ArraySessionHandler(3600), $this->logger, $loop);
-
-        $registry = new Registry($this->logger);
-
-        $dispatcher = new LoggingDispatcher(
-            $configuration,
-            $registry,
-            new SubscriptionManager($this->logger),
-            null,
-            $this->invocationLogger,
-        );
-
-        $protocol = new Protocol($configuration, $registry, $sessionManager, $dispatcher);
-
-        // Register YAML tools into the library registry.
-        (new YamlToolRegistrar($this->toolRegistry, $this->logger))->register($registry);
-
-        return new McpStack($protocol, $sessionManager);
+    /**
+     * Mints and destroys sessions for callers that drive the server
+     * in-process — the REST surface, which runs one `tools/call` per HTTP
+     * request without a client handshake.
+     */
+    public function sessionManager(): SessionManager
+    {
+        return new SessionManager($this->sessionStore(), $this->logger);
     }
 }

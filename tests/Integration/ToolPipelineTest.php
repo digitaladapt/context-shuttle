@@ -17,6 +17,8 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
  */
 final class ToolPipelineTest extends WebTestCase
 {
+    use McpSessionTrait;
+
     public function test_health_endpoint(): void
     {
         $client = self::createClient();
@@ -76,18 +78,39 @@ final class ToolPipelineTest extends WebTestCase
         self::assertSame(1, $data['id']);
         self::assertSame('context-shuttle-test', $data['result']['serverInfo']['name']);
         self::assertArrayHasKey('tools', $data['result']['capabilities']);
+
+        // The handshake is what mints the session every later request needs.
+        self::assertNotNull(
+            $client->getResponse()->headers->get('Mcp-Session-Id'),
+            'initialize must return an Mcp-Session-Id header.',
+        );
     }
 
-    public function test_mcp_tools_list(): void
+    public function test_mcp_non_initialize_request_without_session_is_rejected(): void
     {
+        // Deliberate behaviour change from the previous library, which minted a
+        // throwaway session per request. The SDK requires a real handshake, so a
+        // caller that skips it is told so instead of being silently served.
         $client = self::createClient();
         $client->request('POST', '/mcp', server: [
             'CONTENT_TYPE' => 'application/json',
             'HTTP_ACCEPT' => 'application/json, text/event-stream',
         ], content: '{"jsonrpc":"2.0","id":2,"method":"tools/list"}');
 
+        self::assertResponseStatusCodeSame(400);
+        $data = $this->jsonRpcResponse($client);
+        self::assertSame(-32600, $data['error']['code']);
+        self::assertStringContainsString('session id is REQUIRED', $data['error']['message']);
+    }
+
+    public function test_mcp_tools_list(): void
+    {
+        $client = self::createClient();
+        $sessionId = $this->initializeMcpSession($client);
+        $this->mcpRequest($client, $sessionId, '{"jsonrpc":"2.0","id":2,"method":"tools/list"}');
+
         self::assertResponseIsSuccessful();
-        $data = json_decode((string) $client->getResponse()->getContent(), true);
+        $data = $this->jsonRpcResponse($client);
 
         $names = array_column($data['result']['tools'], 'name');
         self::assertContains('echo', $names);
@@ -100,16 +123,14 @@ final class ToolPipelineTest extends WebTestCase
     public function test_mcp_tools_call_echo(): void
     {
         $client = self::createClient();
-        $client->request('POST', '/mcp', server: [
-            'CONTENT_TYPE' => 'application/json',
-            'HTTP_ACCEPT' => 'application/json, text/event-stream',
-        ], content: <<<'JSON'
+        $sessionId = $this->initializeMcpSession($client);
+        $this->mcpRequest($client, $sessionId, <<<'JSON'
             {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{
               "name":"echo","arguments":{"message":"hello shuttle","style":"upper"}}}
             JSON);
 
         self::assertResponseIsSuccessful();
-        $data = json_decode((string) $client->getResponse()->getContent(), true);
+        $data = $this->jsonRpcResponse($client);
 
         self::assertFalse($data['result']['isError']);
         $text = $data['result']['content'][0]['text'];
@@ -120,16 +141,14 @@ final class ToolPipelineTest extends WebTestCase
     public function test_mcp_invalid_arguments(): void
     {
         $client = self::createClient();
-        $client->request('POST', '/mcp', server: [
-            'CONTENT_TYPE' => 'application/json',
-            'HTTP_ACCEPT' => 'application/json',
-        ], content: <<<'JSON'
+        $sessionId = $this->initializeMcpSession($client);
+        $this->mcpRequest($client, $sessionId, <<<'JSON'
             {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{
               "name":"echo","arguments":{"message":123}}}
             JSON);
 
         self::assertResponseIsSuccessful();
-        $data = json_decode((string) $client->getResponse()->getContent(), true);
+        $data = $this->jsonRpcResponse($client);
 
         self::assertSame(-32602, $data['error']['code']);
     }
@@ -142,28 +161,52 @@ final class ToolPipelineTest extends WebTestCase
             'HTTP_ACCEPT' => 'application/json',
         ], content: '{not json');
 
-        self::assertResponseStatusCodeSame(400);
-        $data = json_decode((string) $client->getResponse()->getContent(), true);
+        // The SDK reports a parse error as a JSON-RPC error inside a 200, not
+        // as an HTTP 400: the transport succeeded, the *message* did not parse.
+        self::assertResponseIsSuccessful();
+        $data = $this->jsonRpcResponse($client);
         self::assertSame(-32700, $data['error']['code']);
     }
 
     public function test_mcp_unknown_tool(): void
     {
         $client = self::createClient();
-        $client->request('POST', '/mcp', server: [
-            'CONTENT_TYPE' => 'application/json',
-            'HTTP_ACCEPT' => 'application/json',
-        ], content: <<<'JSON'
+        $sessionId = $this->initializeMcpSession($client);
+        $this->mcpRequest($client, $sessionId, <<<'JSON'
             {"jsonrpc":"2.0","id":5,"method":"tools/call","params":{
               "name":"nope","arguments":{}}}
             JSON);
 
         self::assertResponseIsSuccessful();
-        $data = json_decode((string) $client->getResponse()->getContent(), true);
+        $data = $this->jsonRpcResponse($client);
 
-        // The library maps unknown tool names to JSON-RPC method-not-found.
-        self::assertSame(-32601, $data['error']['code']);
+        // An unknown tool is invalid *params*: tools/call exists, the name in
+        // its params does not.
+        self::assertSame(-32602, $data['error']['code']);
         self::assertStringContainsString('nope', $data['error']['message']);
+    }
+
+    public function test_mcp_tool_failure_message_reaches_the_client(): void
+    {
+        // Regression guard for the whole reason
+        // ToolFailureTranslatingReferenceHandler exists: an unconfigured
+        // upstream must surface its actionable message, not a generic
+        // "Error while executing tool".
+        $client = self::createClient();
+        $sessionId = $this->initializeMcpSession($client);
+        $this->mcpRequest($client, $sessionId, <<<'JSON'
+            {"jsonrpc":"2.0","id":6,"method":"tools/call","params":{
+              "name":"get_transactions","arguments":{"from":"2026-01-01","to":"2026-01-31"}}}
+            JSON);
+
+        self::assertResponseIsSuccessful();
+        $data = $this->jsonRpcResponse($client);
+
+        self::assertTrue($data['result']['isError']);
+        self::assertStringContainsString(
+            'PENNYTRACK_URL is not configured',
+            $data['result']['content'][0]['text'],
+        );
     }
 
     public function test_rest_invoke_echo(): void

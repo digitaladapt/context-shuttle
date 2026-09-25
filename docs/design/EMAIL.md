@@ -56,6 +56,8 @@ documentation. The ones that changed the design are marked ⚠️.
 | 21 | **A headers-only listing costs two round trips**: one `UID SEARCH ALL`, one batched `UID FETCH`. | Cost is dominated by mailbox size, not message count, because `SEARCH ALL` enumerates every UID before we page client-side. Noted as a scaling cliff, not a v1 blocker. |
 | 22 | **Failures are clean and typed**: `[AUTHENTICATIONFAILED]` on bad credentials, `ImapConnectionFailedException` (*Connection refused*) on an unreachable host, `ItemNotFoundException` on a missing folder or UID. | All map onto the repo's existing "a clear sentence naming the parameter or env var" error convention. |
 | 23 | ⚠️ **`flag()` will happily set a system flag if handed one.** `flag('\\Deleted', '+')` was accepted and `isDeleted()` became `true` — the same call that sets an ordinary keyword sets a *system* flag, with no validation in between. | `tag_email` **rejects `\`-prefixed tags**. Without that check, the tagging tool is a second, ungated path to `\Deleted` — which is the whole permission split this design exists to enforce, and it would be reachable *without* `IMAP_MOVE_SOURCE_FOLDERS`. |
+| 24 | ⚠️ *(implementation)* **`%` is not a wildcard inside a quoted string.** The obvious spelling of this tool's "substring" search is `SUBJECT "%term%"`; queried that way the server looks for a subject containing percent signs and returns **nothing, with no error**. Dovecot substring-matches `SUBJECT` and `FROM` natively: verified `SUBJECT Reuni` matched three messages while `SUBJECT "%Reuni%"` matched none. | Free-text values go out **bare**, quoted but unwrapped. This corrects the v0.1 draft, which proposed wrapping them. |
+| 25 | ⚠️ *(implementation)* **`attachments(fetch: true)` downloads every attachment.** Its `LazyBodyPartStream::getSize()` is `strlen($this->getOrFetchContent())`, so reading a *size* fetches the whole part — a listing that used it issued an extra `UID FETCH (BODY.PEEK[2])` per attachment. | Attachment metadata is read straight off `BODYSTRUCTURE`, which already carries name, type and size. The size bound in `read_email` is a *partial* fetch (`BODY.PEEK[n]<0.max>`), so the bytes never cross the network — verified: a 2.3 MB part came back as exactly 1000 bytes for `<0.1000>`. |
 
 ## Configuration
 
@@ -535,6 +537,8 @@ UTF-8 literal, not the mUTF-7 conversion.
 | `INBOX` matches case-insensitively; `Archive` does not | finding 19 |
 | a folder outside the operation's allowlist is refused | the gate itself |
 | `tag_email` refuses a `\`-prefixed tag | finding 23 — the ungated `\Deleted` path |
+| free-text search terms are sent bare, not `%wrapped%` | finding 24 — the silent zero-match |
+| attachment metadata costs no extra fetch | finding 25 — the lazy-stream download trap |
 
 **One opt-in integration test** against a real Dovecot, in the same spirit
 as the calendar work's Radicale instance, for the things mocks cannot
