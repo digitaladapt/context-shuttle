@@ -63,6 +63,35 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
   it keeps only the last of any repeated element and repeated `<response>`
   elements are how a multistatus carries its payload. Still no
   `calendar_get_event`, `calendar_list_tasks`, ICS, or writes.
+- `docs/design/EMAIL.md`: design draft for the email tool family — read-
+  first IMAP through `directorytree/imapengine` (pure PHP, so no
+  `ext-imap`, which is not thread-safe) with **every operation gated by a
+  folder allowlist**: reading, tagging, marking, moving in and moving out
+  are separate permissions, and every write-ish one is off until an
+  operator names folders. `list_emails`, `read_email`,
+  `mark_email_read`/`unread`, `tag_email`, `move_email` and
+  `list_email_folders`. **There is no delete**, and that is a fact about
+  IMAP rather than a policy: `EXPUNGE` clears every `\Deleted` message in
+  the mailbox, including flags other clients set, so `destination:`
+  `"trash"`/`"archive"`/`"folder"` move a message into a configured
+  folder where a human can recover it. Content fetches are `BODY.PEEK`,
+  so "show me this email" cannot mark it read; the agent tracks its own
+  read state with custom IMAP keywords (`tagged`/`untagged` filters)
+  rather than `\Seen`, which is the human's flag. Written against a live
+  Dovecot 2.4.1 instance rather than from documentation, which surfaced
+  four `imapengine` defects worth working around — the worst being that
+  non-ASCII search **silently returns zero results** (plain values are
+  run through `Str::toImapUtf7()`, which is a folder-name encoding, not a
+  search-term one), and that the friendly header accessor truncates
+  `Authentication-Results` to the part *before* the SPF/DKIM/DMARC
+  verdicts. Also recorded: `move()` returns `null` on success here,
+  `paginate()` reads the global `$_GET['page']` and hard-fails on a stale
+  value, `LengthAwarePaginator` is not iterable, and several folder- and
+  date-matching semantics that would otherwise be guessed at. One finding
+  is a security property rather than a quirk: `flag()` accepts a
+  `\`-prefixed value and sets a *system* flag, so `tag_email` rejects those
+  or it would be a second, ungated path to `\Deleted`. Planning only; no
+  code yet.
 
 
 ### Changed
