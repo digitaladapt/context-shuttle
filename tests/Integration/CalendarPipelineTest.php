@@ -112,7 +112,7 @@ final class CalendarPipelineTest extends WebTestCase
     public function test_a_missing_tool_is_a_404(): void
     {
         $client = static::createClient();
-        $client->request('POST', '/tools/calendar_list_tasks');
+        $client->request('POST', '/tools/calendar_reschedule_everything');
 
         self::assertResponseStatusCodeSame(404);
     }

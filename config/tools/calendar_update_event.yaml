@@ -1,0 +1,41 @@
+# Calendar event update.
+#
+# The companion to calendar_create_event, and like it only registered when a
+# calendar has been named for writing (`requires_writes`).
+#
+# The description leads on the two things a caller cannot infer: that the id
+# decides the scope, and that omitted fields are left alone.
+name: calendar_update_event
+description: >
+  Change an event. The id decides how much is changed: pass back an id from
+  calendar_list_events to change that one occurrence, or pass a plain series
+  uid (the uid field) to change every occurrence. Only the fields you pass
+  are changed — omitted ones keep their current values, so renaming an event
+  does not move it. To clear a description or location, pass an empty
+  string. Times use the same format as calendar_create_event: wall-clock
+  values in the deployment's timezone, YYYY-MM-DD HH:MM or YYYY-MM-DD for an
+  all-day event, never the offset-bearing form listings return. If the event
+  was changed elsewhere since you read it the update is refused rather than
+  overwriting, so re-read it with calendar_get_event and try again.
+requires_writes: true
+handler: App\Tool\Calendar\UpdateEventTool::updateEvent
+parameters:
+  id:
+    type: string
+    description: 'An id from calendar_list_events to change one occurrence, or a plain series uid to change the whole series.'
+    required: true
+  summary:
+    type: string
+    description: 'New title. Omit to leave it unchanged.'
+  start:
+    type: string
+    description: 'New start: YYYY-MM-DD HH:MM or YYYY-MM-DD. Omit to leave the time unchanged.'
+  end:
+    type: string
+    description: 'New end, same format as start. Omit to leave it unchanged.'
+  description:
+    type: string
+    description: 'New notes. Pass an empty string to clear them; omit to leave them unchanged.'
+  location:
+    type: string
+    description: 'New location. Pass an empty string to clear it; omit to leave it unchanged.'

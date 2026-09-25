@@ -7,6 +7,7 @@ namespace App\Calendar\Mapping;
 use App\Calendar\Domain\CalendarEvent;
 use App\Calendar\Domain\CalendarObject;
 use App\Calendar\Domain\CalendarProblem;
+use App\Calendar\Domain\CalendarTask;
 use App\Calendar\Domain\CompositeId;
 use App\Calendar\Domain\TimeZoneRule;
 use App\Calendar\Ics\FixedOffsetTzidRewriter;
@@ -14,9 +15,11 @@ use DateTimeImmutable;
 use DateTimeZone;
 use Exception;
 use RuntimeException;
+use Sabre\VObject\Component;
 use Sabre\VObject\Component\VCalendar;
 use Sabre\VObject\Component\VEvent;
 use Sabre\VObject\Component\VTimeZone;
+use Sabre\VObject\Component\VTodo;
 use Sabre\VObject\Parameter;
 use Sabre\VObject\Property;
 use Sabre\VObject\Property\ICalendar\DateTime as DateTimeProperty;
@@ -65,6 +68,318 @@ final readonly class EventMapper
         private TimeZoneRule $timeZone,
         private FixedOffsetTzidRewriter $rewriter = new FixedOffsetTzidRewriter(),
     ) {
+    }
+
+    /**
+     * Map one calendar object's VTODOs to task rows.
+     *
+     * Tasks do **not** go through `calendar->expand()`. A VTODO is not a
+     * recurring meeting: `RRULE` on a task is rare, and expanding one would
+     * turn a single checklist item into a row per occurrence, which is not
+     * what "what's outstanding?" is asking. The VTODO components are mapped
+     * as they stand, in declared order.
+     *
+     * @return array{0: list<CalendarTask>, 1: list<CalendarProblem>}
+     */
+    public function mapTask(CalendarObject $object): array
+    {
+        try {
+            $calendar = Reader::read($this->rewriter->rewrite($object->data), Reader::OPTION_FORGIVING);
+        } catch (Throwable $e) {
+            return [[], [new CalendarProblem(
+                reason: 'unparseable payload: '.$e->getMessage(),
+                calendarHref: $object->calendar->href,
+                href: $object->href,
+            )]];
+        }
+
+        if (!$calendar instanceof VCalendar) {
+            return [[], [new CalendarProblem(
+                reason: 'payload is not a calendar',
+                calendarHref: $object->calendar->href,
+                href: $object->href,
+            )]];
+        }
+
+        // Collected once, so resolving a TZID never re-parses the document.
+        $declaredTimezones = $this->declaredTimezones($calendar);
+
+        // The same check the event path makes before mapping anything. A
+        // task's `DUE` can carry an unresolvable TZID exactly as an event's
+        // `DTSTART` can, and sabre resolves it to UTC with no complaint — a
+        // fabricated instant presented as fact. Events had this guard from
+        // the start; tasks were missing it until a fixture showed one
+        // returning a confident time in the wrong zone.
+        $problems = [];
+        $unreliableUids = $this->unreliableUids($calendar, $declaredTimezones, $object, $problems);
+
+        // Captured before sabre's coercion, so a non-numeric integer is
+        // reported as absent rather than as a confident zero.
+        $rawIntegers = $this->rawPropertyValues($object->data, ['PERCENT-COMPLETE', 'PRIORITY']);
+
+        $tasks = [];
+
+        foreach ($calendar->select('VTODO') as $component) {
+            if (!$component instanceof VTodo) {
+                continue;
+            }
+
+            if (isset($unreliableUids[$this->uidOf($component) ?? ''])) {
+                continue;
+            }
+
+            try {
+                $tasks[] = $this->mapOneTask($component, $object, $declaredTimezones, $rawIntegers);
+            } catch (Throwable $e) {
+                $problems[] = new CalendarProblem(
+                    reason: 'task could not be normalized: '.$e->getMessage(),
+                    uid: $this->uidOf($component),
+                    calendarHref: $object->calendar->href,
+                    href: $object->href,
+                );
+            }
+        }
+
+        return [$tasks, $problems];
+    }
+
+    /**
+     * @param VTodo&iterable<mixed, mixed> $component
+     * @param list<string>                 $declaredTimezones
+     * @param array<string, string>        $rawIntegers
+     */
+    private function mapOneTask(VTodo $component, CalendarObject $object, array $declaredTimezones, array $rawIntegers = []): CalendarTask
+    {
+        $uid = $this->uidOf($component) ?? '';
+        $due = $this->dateTimeProperty($component, 'DUE');
+
+        $dueValue = null;
+        $dueIsDate = false;
+        $orderKey = '';
+        $hasDue = false;
+
+        if (null !== $due) {
+            if ($due->hasTime()) {
+                $instant = $this->instantOf($due, $component, $declaredTimezones);
+                $dueValue = $this->timeZone->render($instant);
+                // The order key is UTC, so ordering and the page cursor
+                // cannot disagree with each other or with a TZ change.
+                $orderKey = $instant->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z');
+            } else {
+                // A date-only due date is never converted through a zone.
+                $dueValue = $this->formatDate((string) $due->getValue());
+                $dueIsDate = true;
+                $orderKey = $dueValue;
+            }
+
+            $hasDue = true;
+        }
+
+        // A task without a deadline still needs a position in the order, and
+        // "after everything dated" is the only honest one. The key is a high
+        // sentinel rather than an empty string, so undated tasks group
+        // together at the end instead of sorting among the dated ones.
+        if (!$hasDue) {
+            $orderKey = '~';
+        }
+
+        return new CalendarTask(
+            id: $uid,
+            uid: $uid,
+            summary: $this->text($component, 'SUMMARY') ?? '',
+            description: $this->text($component, 'DESCRIPTION'),
+            due: $dueValue,
+            dueIsDate: $dueIsDate,
+            status: $this->text($component, 'STATUS'),
+            percentComplete: $this->intProperty($component, 'PERCENT-COMPLETE', $rawIntegers),
+            priority: $this->intProperty($component, 'PRIORITY', $rawIntegers),
+            completedAt: $this->completedAt($component, $declaredTimezones),
+            categories: $this->categories($component),
+            readonly: $object->calendar->readonly,
+            calendar: $object->calendar,
+            orderKey: $orderKey,
+            hasDue: $hasDue,
+        );
+    }
+
+    /**
+     * `COMPLETED` is an instant (or a date), normalized like any other.
+     *
+     * @param VTodo&iterable<mixed, mixed> $component
+     * @param list<string>                 $declaredTimezones
+     */
+    private function completedAt(VTodo $component, array $declaredTimezones): ?string
+    {
+        $property = $this->dateTimeProperty($component, 'COMPLETED');
+
+        if (null === $property) {
+            return null;
+        }
+
+        if (!$property->hasTime()) {
+            return $this->formatDate((string) $property->getValue());
+        }
+
+        return $this->timeZone->render($this->instantOf($property, $component, $declaredTimezones));
+    }
+
+    /**
+     * The payload's own text for the named properties, keyed by name.
+     *
+     * Needed because `sabre/vobject` **coerces** integer-typed properties: a
+     * non-numeric `PERCENT-COMPLETE` becomes `0` while parsing, and
+     * `getRawMimeDirValue()` merely re-serializes that coerced value — so the
+     * original spelling is unrecoverable from the object graph. It has to be
+     * scanned out of the raw payload. The distinction matters: reporting 0%
+     * complete for a payload that never said so is a fabricated answer, and
+     * indistinguishable from a genuine zero once parsed.
+     *
+     * A cheap line scan rather than a second parse, and only for the
+     * properties asked for.
+     *
+     * @param list<string> $names
+     *
+     * @return array<string, string>
+     */
+    private function rawPropertyValues(string $ics, array $names): array
+    {
+        $wanted = array_flip(array_map('strtoupper', $names));
+        $values = [];
+
+        foreach (preg_split('/\r\n|\r|\n/', $ics) ?: [] as $line) {
+            // The value starts after the first colon that is not inside the
+            // parameter list; these properties carry no quoted parameters.
+            $separator = strpos($line, ':');
+
+            if (false === $separator) {
+                continue;
+            }
+
+            // `PERCENT-COMPLETE;X=Y:20` -> `PERCENT-COMPLETE`.
+            $name = strtoupper(explode(';', substr($line, 0, $separator), 2)[0]);
+
+            if (isset($wanted[$name]) && !isset($values[$name])) {
+                $values[$name] = substr($line, $separator + 1);
+            }
+        }
+
+        return $values;
+    }
+
+    /**
+     * Every component of the named types.
+     *
+     * `Component::select()` takes **one** name — it is not variadic, so a
+     * second argument is silently ignored rather than rejected. Calling it
+     * once per name keeps that trap out of the call sites: the first version
+     * of this code passed two names and quietly checked events only, which is
+     * how a task with an unresolvable `TZID` slipped past a guard written to
+     * catch exactly that.
+     *
+     * @param VCalendar&iterable<mixed, mixed> $calendar
+     *
+     * @return list<Component>
+     */
+    private function selectAll(VCalendar $calendar, string ...$names): array
+    {
+        $components = [];
+
+        foreach ($names as $name) {
+            foreach ($calendar->select($name) as $component) {
+                if ($component instanceof Component) {
+                    $components[] = $component;
+                }
+            }
+        }
+
+        return $components;
+    }
+
+    /**
+     * An integer property, or null when absent or unparseable.
+     *
+     * A non-numeric value is treated as absent rather than as zero: a task
+     * silently reported at 0% complete, or at priority 0 ("undefined" in RFC
+     * 5545), would be a fabricated answer.
+     *
+     * @param VTodo&iterable<mixed, mixed> $component
+     * @param array<string, string>        $rawValues the payload's own text, taken before parsing
+     */
+    private function intProperty(VTodo $component, string $name, array $rawValues = []): ?int
+    {
+        $properties = $component->select($name);
+        $property = $properties[0] ?? null;
+
+        if (!$property instanceof Property) {
+            return null;
+        }
+
+        // Prefer the payload's own text. `getValue()` cannot be trusted here:
+        // sabre types this as an `IntegerValue` and coerces anything
+        // unparseable to `0`, and `getRawMimeDirValue()` merely re-serializes
+        // that coerced value — so "lots" and a genuine "0" are
+        // indistinguishable once parsed. Reporting 0% complete for a payload
+        // that never said so is exactly the fabricated answer this method
+        // exists to avoid, so the pre-parse text wins when we have it.
+        $raw = trim($rawValues[strtoupper($name)] ?? $property->getRawMimeDirValue());
+
+        return 1 === preg_match('/^-?\d+$/', $raw) ? (int) $raw : null;
+    }
+
+    /**
+     * The earliest start any component in this payload declares, unexpanded.
+     *
+     * Used to anchor an expansion window on the **series itself** rather than
+     * on the current date: a caller looking a series up by UID is saying
+     * nothing about when it happens, and anchoring on "now" would report an
+     * empty series for anything historical — including a one-off event that
+     * already happened.
+     *
+     * Returns null when the payload cannot be read, leaving the caller to
+     * fall back to its own bounds.
+     */
+    public function seriesStart(CalendarObject $object): ?DateTimeImmutable
+    {
+        try {
+            $calendar = Reader::read($this->rewriter->rewrite($object->data), Reader::OPTION_FORGIVING);
+        } catch (Throwable) {
+            return null;
+        }
+
+        if (!$calendar instanceof VCalendar) {
+            return null;
+        }
+
+        $starts = [];
+
+        foreach ($this->selectAll($calendar, 'VEVENT', 'VTODO') as $component) {
+            if (!$component instanceof VEvent && !$component instanceof VTodo) {
+                continue;
+            }
+
+            $start = $this->dateTimeProperty($component, 'DTSTART');
+
+            if (null === $start) {
+                continue;
+            }
+
+            // An all-day series anchors on its date read in the deployment's
+            // timezone, so the window lines up with how it will be expanded.
+            $instants = $start->getDateTimes($this->timeZone->zone());
+            $first = $instants[0] ?? null;
+
+            if (null !== $first) {
+                $starts[] = DateTimeImmutable::createFromInterface($first);
+            }
+        }
+
+        if ([] === $starts) {
+            return null;
+        }
+
+        usort($starts, static fn (DateTimeImmutable $a, DateTimeImmutable $b): int => $a <=> $b);
+
+        return $starts[0];
     }
 
     /**
@@ -177,8 +492,8 @@ final readonly class EventMapper
     {
         $unreliable = [];
 
-        foreach ($calendar->select('VEVENT') as $component) {
-            if (!$component instanceof VEvent) {
+        foreach ($this->selectAll($calendar, 'VEVENT', 'VTODO') as $component) {
+            if (!$component instanceof VEvent && !$component instanceof VTodo) {
                 continue;
             }
 
@@ -295,11 +610,11 @@ final readonly class EventMapper
      * before expansion, because `expand()` would already have replaced it
      * with a fabricated UTC instant (finding 6).
      *
-     * @param DateTimeProperty&iterable<mixed, mixed> $property
-     * @param VEvent&iterable<mixed, mixed>           $component
-     * @param list<string>                            $declaredTimezones
+     * @param DateTimeProperty&iterable<mixed, mixed>                        $property
+     * @param (VEvent&iterable<mixed, mixed>)|(VTodo&iterable<mixed, mixed>) $component
+     * @param list<string>                                                   $declaredTimezones
      */
-    private function instantOf(DateTimeProperty $property, VEvent $component, array $declaredTimezones): DateTimeImmutable
+    private function instantOf(DateTimeProperty $property, VEvent|VTodo $component, array $declaredTimezones): DateTimeImmutable
     {
         $tzid = $this->tzidOf($property);
 
@@ -457,9 +772,9 @@ final readonly class EventMapper
     }
 
     /**
-     * @param VEvent&iterable<mixed, mixed> $component
+     * @param (VEvent&iterable<mixed, mixed>)|(VTodo&iterable<mixed, mixed>) $component
      */
-    private function text(VEvent $component, string $name): ?string
+    private function text(VEvent|VTodo $component, string $name): ?string
     {
         $properties = $component->select($name);
         $property = $properties[0] ?? null;
@@ -474,11 +789,11 @@ final readonly class EventMapper
     }
 
     /**
-     * @param VEvent&iterable<mixed, mixed> $component
+     * @param (VEvent&iterable<mixed, mixed>)|(VTodo&iterable<mixed, mixed>) $component
      *
      * @return list<string>
      */
-    private function categories(VEvent $component): array
+    private function categories(VEvent|VTodo $component): array
     {
         $properties = $component->select('CATEGORIES');
         $property = $properties[0] ?? null;
@@ -503,11 +818,11 @@ final readonly class EventMapper
     /**
      * The first date-time property with this name, if any.
      *
-     * @param VEvent&iterable<mixed, mixed> $component
+     * @param (VEvent&iterable<mixed, mixed>)|(VTodo&iterable<mixed, mixed>) $component
      *
      * @return (DateTimeProperty&iterable<mixed, mixed>)|null
      */
-    private function dateTimeProperty(VEvent $component, string $name): ?DateTimeProperty
+    private function dateTimeProperty(VEvent|VTodo $component, string $name): ?DateTimeProperty
     {
         $properties = $component->select($name);
         $property = $properties[0] ?? null;
@@ -516,9 +831,9 @@ final readonly class EventMapper
     }
 
     /**
-     * @param VEvent&iterable<mixed, mixed> $component
+     * @param (VEvent&iterable<mixed, mixed>)|(VTodo&iterable<mixed, mixed>) $component
      */
-    private function uidOf(VEvent $component): ?string
+    private function uidOf(VEvent|VTodo $component): ?string
     {
         $properties = $component->select('UID');
         $property = $properties[0] ?? null;

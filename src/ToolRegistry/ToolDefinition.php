@@ -30,6 +30,13 @@ final readonly class ToolDefinition
      *     maximum?: float|int
      * }> $parameters JSON-Schema properties keyed by parameter name
      * @param array{lat: float, lon: float}|null $defaultLocation special-cased default for the Weather tool
+     * @param bool                               $requiresWrites  the tool can only exist when writes
+     *                                                            are enabled; absent from the tool
+     *                                                            list otherwise, rather than listed
+     *                                                            and refusing. A requirement rather
+     *                                                            than a permission: it says what the
+     *                                                            tool needs, and `ToolAvailability`
+     *                                                            decides whether the deployment has it.
      */
     public function __construct(
         public string $name,
@@ -37,13 +44,14 @@ final readonly class ToolDefinition
         public string $handler,
         public array $parameters,
         public ?array $defaultLocation = null,
+        public bool $requiresWrites = false,
     ) {
     }
 
     /**
      * JSON Schema (draft 2020-12 style object schema) for the tool input.
      *
-     * Consumed directly by php-mcp/server's manual registration and by the
+     * Consumed directly by the MCP SDK's manual tool registration and by the
      * REST layer's validation; also the source for the OpenAPI requestBody.
      *
      * @return array{type: 'object', properties: array<string, mixed>, additionalProperties: false, required?: non-empty-list<string>}

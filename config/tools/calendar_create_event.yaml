@@ -1,0 +1,40 @@
+# Calendar event creation.
+#
+# `requires_writes: true` means this tool is only registered when a calendar
+# has been named for writing. On a deployment that has not opted in it is
+# absent from tools/list entirely rather than listed and refusing — a model
+# cannot attempt a mutation it cannot see.
+#
+# There is deliberately no `calendar` parameter: the target is configuration,
+# never an argument.
+name: calendar_create_event
+description: >
+  Create one event on the calendar. Times are wall-clock values in the
+  deployment's timezone: pass YYYY-MM-DD HH:MM for a timed event, or
+  YYYY-MM-DD alone for an all-day event. Do not pass back the timestamp
+  format that listings return (with an offset) — that form is refused, and
+  no offset reasoning is needed here. For an all-day event the end date is
+  exclusive, so a single day on the 5th ends on the 6th. Omit end for an
+  all-day event to get a single day. Returns the uid, and the created event
+  can then be fetched with calendar_get_event or found with
+  calendar_list_events. Changing an event is calendar_update_event.
+requires_writes: true
+handler: App\Tool\Calendar\CreateEventTool::createEvent
+parameters:
+  summary:
+    type: string
+    description: 'The event title, e.g. "Dentist" or "Team standup".'
+    required: true
+  start:
+    type: string
+    description: 'When it starts: YYYY-MM-DD HH:MM (e.g. 2026-12-01 09:30) in the deployment timezone, or YYYY-MM-DD for an all-day event.'
+    required: true
+  end:
+    type: string
+    description: 'When it ends, same format as start. Optional. For an all-day event this is the exclusive last day.'
+  description:
+    type: string
+    description: 'Notes for the event.'
+  location:
+    type: string
+    description: 'Where it happens.'

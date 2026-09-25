@@ -166,10 +166,115 @@ All configuration via environment variables — see `.env.example`. Key vars:
 | `NTFY_URL` / `NTFY_TOKEN` | `https://ntfy.sh` / empty | Self-hosted ntfy server and access token |
 | `DISCORD_WEBHOOK_URL` | empty | Enable the Discord channel of `send_alert` |
 | `DISCORD_MENTION_USER_ID` | empty | User mentioned by priority-5 alerts only |
+| `IMAP_HOST` / `IMAP_USERNAME` / `IMAP_PASSWORD` | empty | Enable the email tools. Use an app password for Gmail |
+| `IMAP_PORT` / `IMAP_ENCRYPTION` | derived / `ssl` | Port defaults to 993 for `ssl`, 143 otherwise |
+| `IMAP_READ_FOLDERS` | empty | Folders `list_emails` and `read_email` may name |
+| `IMAP_TAG_FOLDERS` / `IMAP_MARK_FOLDERS` | empty | Folders `tag_email` / `mark_email_*` may change |
+| `IMAP_MOVE_SOURCE_FOLDERS` / `IMAP_MOVE_TARGET_FOLDERS` | empty | Folders `move_email` may take from / move into |
+| `IMAP_TRASH_FOLDER` / `IMAP_ARCHIVE_FOLDER` | empty | What `move_email`'s `trash` / `archive` mean |
+| `IMAP_DELETE_FOLDER` | empty | Alias for `IMAP_TRASH_FOLDER`; wins when both are set |
+| `CALDAV_URL` / `CALDAV_USERNAME` / `CALDAV_PASSWORD` | empty | Enable the calendar read tools (`calendar_list_events`, `calendar_get_event`, and the task tools) |
+| `CALDAV_CALENDARS` | empty | Optional comma-separated calendars to expose; empty means all discovered |
+| `CALDAV_EDITABLE_CALENDAR` | empty | The **one** calendar the write tools may modify; **empty means those tools do not exist** |
+| `ICS_URL` | empty | An http(s) iCalendar feed to read as a second calendar source |
+| `ICS_NAME` | `ics` | Display name for the feed's synthetic calendar |
+| `TZ` | `UTC` | The timezone every calendar timestamp is rendered in, and date inputs are read in |
 
 Alert channels are enabled by presence: set `NTFY_TOPIC`, `DISCORD_WEBHOOK_URL`,
 or both — every enabled channel receives every alert, and `send_alert` reports
 delivery per channel.
+
+### Email access
+
+The email tools are **gated by folder, per operation**: reading a folder does
+not grant tagging it, marking it read, or moving from it, and every write-ish
+capability is off until an operator names folders in the relevant list. An
+operation on a folder outside its list is refused with a message naming the
+variable to set. `move_email` is the only tool that removes a message from a
+folder, and it **moves** — there is no delete anywhere, because expunging a
+mailbox would also destroy messages other clients had flagged.
+
+### Calendar access
+
+Read-only access to a CalDAV server, for events. Basic auth only, so an app
+password is usually what you want; `CALDAV_PASSWORD` may live in the secrets
+vault (`bin/console secrets:set CALDAV_PASSWORD`) instead of `.env.local`.
+`CALDAV_URL` is not checked at boot — a calendar server being down must never
+stop context-shuttle from starting — so a misconfiguration surfaces on first
+use, with a message naming the variable.
+
+**Google Calendar is not supported.** Google's CalDAV endpoint no longer
+accepts Basic auth, and OAuth is not implemented, so pointing `CALDAV_URL`
+at Google will fail at authentication rather than half-work. Radicale,
+Nextcloud, Baïkal, Fastmail and Apple app passwords all work.
+
+Timestamps come back already expressed in `TZ`, so a caller never has to
+reason about offsets or daylight-saving changes, and `from`/`to` are read in
+the same zone. Recurring events are expanded into one entry per occurrence,
+each with its own `id`; use that `id` — not the shared `uid` — to fetch one
+occurrence back with `calendar_get_event`.
+
+`CALDAV_CALENDARS` narrows which calendars are exposed at all, which matters
+on a real account that also sees subscribed holidays and shared team
+calendars. Entries may be full hrefs (`/user/work/`) or bare names (`work`);
+an entry that matches nothing is logged with the calendars the server did
+offer, so a typo shows up as a warning rather than as an empty listing.
+
+An **ICS feed** (`ICS_URL`) can be configured alongside CalDAV, or instead
+of it. It appears as one read-only calendar; only `http(s)` is accepted, so
+a local file has to be served over HTTP rather than pointed at directly. A
+feed is fetched fresh on every call — nothing is cached.
+
+Both sources produce **identical output shapes**; the only difference a
+caller sees is that a feed's rows are read-only. That is deliberate: a
+result that revealed its own source would invite a caller to branch on it.
+
+### Calendar writes
+
+**Off unless you turn them on.** Set `CALDAV_EDITABLE_CALENDAR` to the one
+calendar writes may touch — a full href (`/user/work/`) or a bare name
+(`work`), matched the same way `CALDAV_CALENDARS` is. While it is empty, the
+`calendar_create_event`, `calendar_update_event` and `calendar_delete_event`
+tools are **not registered at all**: they do not appear in `tools/list`, so a
+model cannot attempt an edit this deployment would refuse. That is a stronger
+statement than a refusal at call time, and it is the one you can verify by
+looking. `/ready` reports the tool count, which changes when you enable them.
+
+**No write tool takes a calendar.** The target is the configured one, never
+something a caller names. A caller that could name a target could name the
+wrong one, and unlike a bad read a bad write is not recoverable.
+
+Times on the way in are wall-clock local values in `TZ` — `2026-12-01 09:30`
+for a timed event, `2026-12-01` alone for an all-day one. The offset-bearing
+form that listings *return* is deliberately refused, with a message saying
+to drop the offset, so a caller never has to reason about one in either
+direction. A wall clock that daylight saving skips is refused rather than
+silently moved.
+
+**Editing one occurrence.** `calendar_update_event` and
+`calendar_delete_event` take an `id` — the same handle a listing returns. An
+id from a listing (a `uid::occurrence` pair) changes **that occurrence** and
+leaves the rest of the series alone; a plain `uid` changes the whole series.
+There is no separate parameter for the scope, because the id already carries
+it and a second way to say it would be a second thing to get wrong. Omitting
+a field leaves it unchanged, so renaming an event does not move it; passing
+an empty string for `description` or `location` clears it.
+
+One thing that is **not** supported: "change this and all future
+occurrences". Editing a single occurrence or the whole series are the two
+supported shapes, and a request for anything between them is refused rather
+than approximated.
+
+**Concurrent edits are refused, not merged.** Every write is conditional on
+the version that was read, so if the event changed in between — in another
+client, or by someone else on a shared calendar — the write fails with a
+message saying to re-read and retry. Reading is what establishes the version;
+there is no last-write-wins.
+
+Note that `readonly` on each row means "these tools can edit this", not "the
+server would allow it". A calendar the server accepts writes for, but which
+is not the one you designated, reports `readonly: true` — because these tools
+will not touch it. This is the field to check before attempting an edit.
 
 ## Development
 

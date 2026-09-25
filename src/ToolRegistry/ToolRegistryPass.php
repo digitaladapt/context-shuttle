@@ -38,6 +38,7 @@ final class ToolRegistryPass implements CompilerPassInterface
                     $definition->handler,
                     $definition->parameters,
                     $definition->defaultLocation,
+                    $definition->requiresWrites,
                 ])
             ;
 

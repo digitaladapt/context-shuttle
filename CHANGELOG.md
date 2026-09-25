@@ -32,6 +32,176 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
     semantics.
   - Adds `symfony/twig-bundle` for the one page; `templates/` is no
     longer `.dockerignore`d now that it is runtime content.
+- Email write path: `tag_email`, `mark_email_read` / `mark_email_unread` and
+  `move_email`, completing the family. All four are gated by their own folder
+  allowlist and refused before a connection opens; the source and target lists
+  for a move are separate checks, so a deployment can allow "file things out of
+  INBOX" without allowing "pull anything out of Archive".
+
+  **There is no delete, and that is now structural.** `move_email`'s `trash`
+  destination resolves to a configured folder (`IMAP_TRASH_FOLDER`, or
+  `IMAP_DELETE_FOLDER` which wins when both are set), so the closest thing to a
+  delete is a move a human can undo. Verified by intercepting the wire across a
+  full write session: zero outbound `EXPUNGE` commands, with the only `EXPUNGE`
+  in the log being the server's own notice that `UID MOVE` relocated the source
+  copy.
+
+  **`tag_email` cannot set a system flag.** The library's `flag()` does no
+  validation — `flag('\Deleted', '+')` sets `\Deleted` (finding 23) — so without
+  a guard the tagging tool would be a second, ungated path to the delete flag,
+  reachable without `IMAP_MOVE_SOURCE_FOLDERS`. `TagName` refuses anything
+  starting with a backslash, and its grammar is anchored with `\z` rather than
+  `$`: PCRE's `$` also matches before a trailing newline, so `/^[a-z]+$/` accepts
+  `"tag\n"` — which would put a newline inside a `STORE` command line. That hole
+  was found by a test, not by review.
+
+  Three further things the implementation learned, all verified against the live
+  Dovecot instance:
+
+  - **`move()` always returns `NULL`** (finding 26, and it is not a server
+    quirk — `getUidFromCopy()` parses the tagged response while Dovecot reports
+    `COPYUID` in an untagged one). `move_email` verifies by observation instead:
+    it reads the `Message-ID` before the move and searches the destination
+    afterwards, which is what the design already asked for. A move that cannot be
+    observed raises rather than reporting `moved: true`.
+  - **`flag()` and `move()` both take an `$expunge` argument** that runs a
+    mailbox-wide `EXPUNGE` (finding 27). Neither is ever passed.
+  - **`HEADER` takes two arguments** — `HEADER <field> <string>` — which the
+    query builder cannot express through two `where()` calls (it emits
+    `HEADER "field" HEADER "value"`, which the server rejects). Built by hand in
+    `SearchValue::header()`.
+
+  Also fixed a defect in the Phase 1 test harness that had been hiding a real
+  bug (finding 28): the scripted server matched `UID FETCH` by substring, so
+  `find(99999)` was answered by a reply written for uid 1 — and the code under
+  test tagged the *wrong message* and reported success. The fixture now only
+  answers for ids it was told exist. 49 new tests.
+
+### Changed
+
+- **MCP server library: the `php-mcp/server` fork → the official `mcp/sdk`**
+  (pinned to `0.8.1`). Upstream `php-mcp/server` has not been pushed to since
+  2025-08-09, so the project was maintaining a private fork of an abandoned
+  library to keep it installing on Symfony 8. The official SDK is that
+  project's successor — same original author, now maintained with the PHP
+  Foundation and Symfony — and is PSR-7 in / PSR-7 out instead of owning a
+  ReactPHP socket, which suits a Symfony request cycle. Full reasoning and the
+  verified API mapping: `docs/design/MCP_SDK_MIGRATION.md`.
+
+  Net effect on this codebase: `CaptureTransport`, `McpStack` and
+  `LoggingDispatcher` are **deleted** (−161 lines); `McpController` no longer
+  contains any JSON-RPC knowledge (no id handling, no error-code table, no
+  media-type negotiation).
+
+- **MCP sessions are now required.** A `tools/call` or `tools/list` sent
+  without a prior `initialize` is refused with `400` / `-32600`. v1.0.0 minted
+  a throwaway session per request, which meant it served clients that never
+  performed the handshake; that was an artifact of the old library. Sessions
+  are stored in the new `mcp_sessions` pool so the handshake spans PHP
+  requests. Point that pool at a shared backend for multi-worker deployments.
+
+- **Tool failures keep their messages.** The SDK replaces any exception other
+  than `ToolCallException` with a generic `-32603 "Error while executing
+  tool"`. Since every tool here reports actionable configuration failures by
+  throwing a plain `RuntimeException`, a
+  `ToolFailureTranslatingReferenceHandler` now performs that translation once,
+  centrally, instead of adding a new exception type to nine tools.
+
+- **Parse errors answer `200` with `-32700` in the body**, not `400`. The HTTP
+  request was fine; the JSON-RPC message was not. Transport-level failures
+  (missing session, bad method) still change the HTTP status.
+
+- **Unknown tool is `-32602` (invalid params)**, not `-32601`. `tools/call`
+  exists; the *name in its params* does not. The REST surface still answers
+  `404`.
+
+### Added
+
+- `docs/design/MCP_SDK_VERSION_CHECK.md` — the monthly `mcp/sdk` update check,
+  and the list of SDK APIs this project depends on.
+- `mcp_sessions` cache pool for MCP session storage.
+- `tests/Integration/McpSessionTrait.php` — shared handshake helper for tests.
+- Test coverage for session enforcement, and a regression test asserting a
+  tool's own error message reaches the client.
+
+### Removed
+
+- `src/Mcp/CaptureTransport.php`, `src/Mcp/McpStack.php`,
+  `src/Mcp/LoggingDispatcher.php` — all three existed to work around the old
+  library's transport model.
+- The `php-mcp-server` VCS `repositories` entry from `composer.json`; the
+  dependency is now plain Packagist.
+
+### Added
+
+- Email read path, first slice: `list_email_folders`, `list_emails` and
+  `read_email` end to end — `directorytree/imapengine` behind an
+  `ImapClient`, the per-operation **folder gate**, page-sized listings with
+  attachment metadata, and a body fetch bounded on the wire. Verified
+  against a live Dovecot 2.4.1 instance (6 messages across 2 folders, plus
+  the HTML-only, non-ASCII, attachment and 3.4 MB fixtures).
+
+  Three things the implementation learned that the design had not
+  anticipated, all found by driving the real server rather than a mock:
+
+  - **`attachments(fetch: true)` downloads every attachment.** The helper
+    wraps each part's content in a `LazyBodyPartStream` whose `getSize()`
+    is `strlen($this->getOrFetchContent())` — so reading a *size* fetches
+    the whole part. A listing that used it turned one envelope fetch into
+    an extra `UID FETCH (BODY.PEEK[2])` per attachment. Attachment metadata
+    now comes straight off `BODYSTRUCTURE`, which already carries name,
+    type and size.
+  - **`%` is not a wildcard inside a quoted string.** The obvious way to
+    express the tool's substring search is `SUBJECT "%term%"`, and that
+    searches for a subject containing percent signs — returning nothing,
+    with no error. Dovecot substring-matches `SUBJECT`/`FROM` natively, so
+    the value goes out bare. (This corrected an assumption in the design
+    itself, which had proposed the wildcard form.)
+  - **A `Mailbox` cannot be reused across `with()` calls.** The fake-server
+    work surfaced this: `connect()` re-opens the stream and re-reads the
+    greeting, so a connection per invocation is not just the thread-safety
+    rule but a practical requirement of how the library is built.
+
+  Search values are also sent as `RawQueryValue` with hand-rolled quoting,
+  which is the fix for the design's finding 3 (plain values are converted
+  to modified UTF-7, which the server matches literally): a search for
+  `Reunión` now returns the message, where before it returned zero results
+  and no error. 84 new tests, including a scripted-server fixture
+  (`tests/Support/RespondingStream.php`) that drives the real client so the
+  wire-level behaviours are pinned rather than mocked away.
+
+- Calendar **writes**, Phase 4: `calendar_create_event`,
+  `calendar_update_event` and `calendar_delete_event`, on the single calendar
+  named by `CALDAV_EDITABLE_CALENDAR`. **Off unless configured** — while the
+  variable is empty those tools are not registered at all, so they do not
+  appear in `tools/list` and a model cannot attempt an edit the deployment
+  would refuse. No write tool takes a `calendar` parameter: the target is
+  configuration, never an argument, because a caller that could name a target
+  could name the wrong one and a bad write is not recoverable the way a bad
+  read is.
+- `readonly` now means "**these tools** can edit this row" rather than "the
+  server would allow it". A calendar the server accepts writes for — but which
+  is not the one designated — reports `readonly: true`, because these tools
+  will not touch it. Reporting the server's opinion alone would have said an
+  edit was available on every writable calendar while only one was reachable,
+  in the field whose entire purpose is to answer that question. The change is
+  a narrowing: rows only ever flip from `false` to `true`.
+- Calendar updates send `If-Match` with the version they read and creates send
+  `If-None-Match: *`, so a change made elsewhere is refused with a message
+  saying to re-read rather than silently overwritten. A `412` is reported as a
+  concurrent modification, not as a generic failure, because it is the one
+  failure with a specific remedy.
+- Editing and deleting act on **one occurrence or the whole series, taken from
+  the id**: an id from a listing (a `uid::occurrence` pair) changes that
+  occurrence by writing a `RECURRENCE-ID` override or an `EXDATE` into the
+  existing object; a plain `uid` changes or deletes the series. There is no
+  parameter for the scope — the id already carries it. "This and all future
+  occurrences" is refused rather than approximated.
+- `docs/design/CALENDAR-WRITES-FINDINGS.md`: what a live CalDAV server actually
+  does with writes, measured before any of it was built, including the two
+  findings that changed the code — a UID must never become a path segment, and
+  an object holding a moved occurrence must not be looked up by time window.
+
 - `docs/design/ROADMAP.md` now records the **decided integration roster**
   and the selection rule behind it: where a service already ships a usable
   MCP server, use it (directly from the harness, or mirrored into the YAML
@@ -128,7 +298,72 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
   `sabre/xml`'s `keyValue` deserializer cannot parse a multistatus, since
   it keeps only the last of any repeated element and repeated `<response>`
   elements are how a multistatus carries its payload. Still no
-  `calendar_get_event`, `calendar_list_tasks`, ICS, or writes.
+  `calendar_list_tasks`, ICS, or writes.
+- Calendar **write shape settled ahead of Phase 4**: writes target exactly
+  one calendar, named by `CALDAV_EDITABLE_CALENDAR`, and the variable being
+  empty means the write tools are **not registered at all** — rather than
+  being listed and refusing, a deployment that has not opted in is one
+  where a model cannot see a mutation verb. No write tool takes a
+  `calendar` argument, deliberately unlike the read tools: a caller that
+  could name a target could name the wrong one, and that mistake is not
+  recoverable the way a bad read is. This also **narrows `readonly`** to
+  mean "these tools can edit this row", so a calendar that is writable on
+  the server but is not the configured one reports `true` — otherwise the
+  field specifically designed to answer "can I edit this?" would say yes
+  about four calendars we will refuse. Rows only ever flip `false` to
+  `true`. Design: the *Writes* section of `docs/design/CALENDARS.md`.
+  Planning only; no code yet.
+- Calendar **ICS feeds**, Phase 3: an `http(s)` iCalendar feed as a second
+  source alongside CalDAV, sharing one `CalendarProvider` contract so the
+  reader never learns which it is talking to. The acceptance criterion is
+  that its output is **indistinguishable from a read-only CalDAV
+  calendar**, so the test renders the same events through both providers
+  and compares row shapes field by field — the only permitted difference
+  is the `calendar` identity (`which` calendar), never `what kind`. A feed
+  is one synthetic read-only calendar, fetched whole on every call and
+  never cached, because a feed changes whenever it likes and offers no
+  `ETag` to lean on. `file://` is refused with a message saying why rather
+  than half-supported, per finding 13. Both sources may be configured at
+  once, or either alone; a source with no URL is removed at compile time
+  rather than registered and failing on every call.
+- Calendar **tasks** (`calendar_list_tasks`, `calendar_get_task`), Phase 2:
+  VTODO through the same contract and mapper, open by default, no date
+  range required, ordered by due date with undated tasks last. Two
+  things were settled against real task data rather than guessed at.
+  **Finding 12 is corrected**: the original result that VTODO filtering
+  behaves identically with and without `<time-range>` held only for
+  tasks whose `DUE` fell inside the tested window — with tasks that
+  straddle it, Radicale returns all five without a range and three with
+  one, and undated tasks escape the filter entirely. Tasks are now
+  fetched *without* a range and filtered client-side, the only shape
+  that behaves the same on every server. And the **YAGNI #3 cursor
+  question** is settled: the cursor anchors to `(due, id)` with undated
+  tasks last, because undated tasks are common and requiring a range
+  would exclude exactly the rows a caller most wants. Two silent bugs
+  came out of the task work, both in shared code: `Component::select()`
+  takes one name and silently ignored a second, so a TZID guard written
+  for events was checking events only and *not* tasks; and sabre coerces
+  a non-numeric `PERCENT-COMPLETE` to `0`, so a task could report 0%
+  complete having never said so. Also fixes a latent `YamlToolRegistrar`
+  bug this work exposed: a tool with no required parameters passed
+  `required: null`, which the MCP validator rejects on every call —
+  invisible until the first tool that required nothing.
+- `calendar_get_event`, closing CalDAV events: it takes either an id
+  from a listing (which fetches exactly that occurrence) or a plain
+  series UID (which expands the series). Both behaviours were caught
+  wrong by running them: the occurrence lookup was returning the
+  neighbours its deliberately-wide server-side window also matched, and
+  the plain-UID window was anchored on "now", so a historical series
+  expanded to nothing — and the 366-day clamp then truncated a
+  two-year window into one that ended in the past, so both anchors
+  returned empty. It now anchors on the series' own `DTSTART`.
+  `CALDAV_CALENDARS` is also live rather than inert: it is the exposure
+  boundary, so it fails closed and logs any entry that matched no
+  discovered calendar, alongside the calendars the server did offer.
+  Adds `CalDavLiveTest`, which runs the read path against a real server
+  when `CALDAV_LIVE_URL` is set and skips otherwise, and documents the
+  calendar tools in the README — including that Google Calendar is not
+  supported, since its CalDAV endpoint no longer accepts Basic auth.
 - `docs/design/EMAIL.md`: design draft for the email tool family — read-
   first IMAP through `directorytree/imapengine` (pure PHP, so no
   `ext-imap`, which is not thread-safe) with **every operation gated by a

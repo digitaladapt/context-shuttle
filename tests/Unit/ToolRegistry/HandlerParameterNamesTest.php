@@ -10,9 +10,9 @@ use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
 
 /**
- * The MCP dispatcher (php-mcp RegisteredElement::prepareArguments) maps tool
- * arguments to handler parameters by exact name. A YAML parameter named
- * "forecast_days" only reaches a handler parameter named $forecast_days —
+ * The MCP SDK (Mcp\Capability\Registry\ReferenceHandler::prepareArguments)
+ * maps tool arguments to handler parameters by exact name. A YAML parameter
+ * named "forecast_days" only reaches a handler parameter named $forecast_days —
  * $forecastDays would silently fall back to its default. Guard that contract
  * for every tool shipped in config/tools.
  *
