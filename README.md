@@ -162,10 +162,17 @@ All configuration via environment variables — see `.env.example`. Key vars:
 | `IMAP_MOVE_SOURCE_FOLDERS` / `IMAP_MOVE_TARGET_FOLDERS` | empty | Folders `move_email` may take from / move into |
 | `IMAP_TRASH_FOLDER` / `IMAP_ARCHIVE_FOLDER` | empty | What `move_email`'s `trash` / `archive` mean |
 | `IMAP_DELETE_FOLDER` | empty | Alias for `IMAP_TRASH_FOLDER`; wins when both are set |
+| `CALDAV_URL` / `CALDAV_USERNAME` / `CALDAV_PASSWORD` | empty | Enable the `calendar_list_events` and `calendar_get_event` tools |
+| `CALDAV_CALENDARS` | empty | Optional comma-separated calendars to expose; empty means all discovered |
+| `ICS_URL` | empty | An http(s) iCalendar feed to read as a second calendar source |
+| `ICS_NAME` | `ics` | Display name for the feed's synthetic calendar |
+| `TZ` | `UTC` | The timezone every calendar timestamp is rendered in, and date inputs are read in |
 
 Alert channels are enabled by presence: set `NTFY_TOPIC`, `DISCORD_WEBHOOK_URL`,
 or both — every enabled channel receives every alert, and `send_alert` reports
 delivery per channel.
+
+### Email access
 
 The email tools are **gated by folder, per operation**: reading a folder does
 not grant tagging it, marking it read, or moving from it, and every write-ish
@@ -174,6 +181,41 @@ operation on a folder outside its list is refused with a message naming the
 variable to set. `move_email` is the only tool that removes a message from a
 folder, and it **moves** — there is no delete anywhere, because expunging a
 mailbox would also destroy messages other clients had flagged.
+
+### Calendar access
+
+Read-only access to a CalDAV server, for events. Basic auth only, so an app
+password is usually what you want; `CALDAV_PASSWORD` may live in the secrets
+vault (`bin/console secrets:set CALDAV_PASSWORD`) instead of `.env.local`.
+`CALDAV_URL` is not checked at boot — a calendar server being down must never
+stop context-shuttle from starting — so a misconfiguration surfaces on first
+use, with a message naming the variable.
+
+**Google Calendar is not supported.** Google's CalDAV endpoint no longer
+accepts Basic auth, and OAuth is not implemented, so pointing `CALDAV_URL`
+at Google will fail at authentication rather than half-work. Radicale,
+Nextcloud, Baïkal, Fastmail and Apple app passwords all work.
+
+Timestamps come back already expressed in `TZ`, so a caller never has to
+reason about offsets or daylight-saving changes, and `from`/`to` are read in
+the same zone. Recurring events are expanded into one entry per occurrence,
+each with its own `id`; use that `id` — not the shared `uid` — to fetch one
+occurrence back with `calendar_get_event`.
+
+`CALDAV_CALENDARS` narrows which calendars are exposed at all, which matters
+on a real account that also sees subscribed holidays and shared team
+calendars. Entries may be full hrefs (`/user/work/`) or bare names (`work`);
+an entry that matches nothing is logged with the calendars the server did
+offer, so a typo shows up as a warning rather than as an empty listing.
+
+An **ICS feed** (`ICS_URL`) can be configured alongside CalDAV, or instead
+of it. It appears as one read-only calendar; only `http(s)` is accepted, so
+a local file has to be served over HTTP rather than pointed at directly. A
+feed is fetched fresh on every call — nothing is cached.
+
+Both sources produce **identical output shapes**; the only difference a
+caller sees is that a feed's rows are read-only. That is deliberate: a
+result that revealed its own source would invite a caller to branch on it.
 
 ## Development
 

@@ -1,0 +1,53 @@
+# Calendar tasks tool — outstanding work from the configured calendar source.
+#
+# Declared separately because the loader treats one YAML file as exactly one
+# tool. Like its event siblings, the description names no data source: the
+# surface must not invite a caller to branch on where tasks came from.
+name: calendar_list_tasks
+description: >
+  List calendar tasks. By default only unfinished tasks are returned, since
+  "what is still outstanding?" is the usual question; pass
+  include_completed true to see finished ones as well. No date range is
+  required, and tasks with no due date are normal — they are returned after
+  the dated ones. Timestamps are already expressed in the deployment's
+  timezone, and the timezone name is repeated in the response. A due date is
+  either a timestamp in that timezone, or a plain date when the task has no
+  time of day, in which case due_is_date is true; the two are never
+  converted into one another. Each entry reports whether it is read-only.
+  Pass next_cursor back verbatim to page through longer lists; has_more
+  false means the list is complete. A non-empty errors string means some
+  tasks were malformed and were skipped — the rest are still valid.
+handler: App\Tool\Calendar\ListTasksTool::listTasks
+parameters:
+  include_completed:
+    type: boolean
+    description: 'Include finished tasks. Defaults to false, so only outstanding work is returned.'
+    required: false
+  calendar:
+    type: string
+    description: 'Restrict to a single calendar, by its href or display name. Omit to search every calendar.'
+    required: false
+  search:
+    type: string
+    description: 'Case-insensitive text match against task summary and description. Omit to return everything.'
+    required: false
+  from:
+    type: string
+    description: 'Only tasks due on or after this date, YYYY-MM-DD (inclusive, in the deployment''s timezone). Task without a due date are excluded when a range is given.'
+    required: false
+    pattern: '^\d{4}-\d{2}-\d{2}$'
+  to:
+    type: string
+    description: 'Only tasks due on or before this date, YYYY-MM-DD (inclusive, must not be before from).'
+    required: false
+    pattern: '^\d{4}-\d{2}-\d{2}$'
+  limit:
+    type: integer
+    description: 'Page size, 1-200. Defaults to 50.'
+    required: false
+    minimum: 1
+    maximum: 200
+  cursor:
+    type: string
+    description: 'Opaque paging token from a previous call''s next_cursor. Omit for the first page; pass it back verbatim otherwise.'
+    required: false

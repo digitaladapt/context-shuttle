@@ -242,7 +242,72 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
   `sabre/xml`'s `keyValue` deserializer cannot parse a multistatus, since
   it keeps only the last of any repeated element and repeated `<response>`
   elements are how a multistatus carries its payload. Still no
-  `calendar_get_event`, `calendar_list_tasks`, ICS, or writes.
+  `calendar_list_tasks`, ICS, or writes.
+- Calendar **write shape settled ahead of Phase 4**: writes target exactly
+  one calendar, named by `CALDAV_EDITABLE_CALENDAR`, and the variable being
+  empty means the write tools are **not registered at all** — rather than
+  being listed and refusing, a deployment that has not opted in is one
+  where a model cannot see a mutation verb. No write tool takes a
+  `calendar` argument, deliberately unlike the read tools: a caller that
+  could name a target could name the wrong one, and that mistake is not
+  recoverable the way a bad read is. This also **narrows `readonly`** to
+  mean "these tools can edit this row", so a calendar that is writable on
+  the server but is not the configured one reports `true` — otherwise the
+  field specifically designed to answer "can I edit this?" would say yes
+  about four calendars we will refuse. Rows only ever flip `false` to
+  `true`. Design: the *Writes* section of `docs/design/CALENDARS.md`.
+  Planning only; no code yet.
+- Calendar **ICS feeds**, Phase 3: an `http(s)` iCalendar feed as a second
+  source alongside CalDAV, sharing one `CalendarProvider` contract so the
+  reader never learns which it is talking to. The acceptance criterion is
+  that its output is **indistinguishable from a read-only CalDAV
+  calendar**, so the test renders the same events through both providers
+  and compares row shapes field by field — the only permitted difference
+  is the `calendar` identity (`which` calendar), never `what kind`. A feed
+  is one synthetic read-only calendar, fetched whole on every call and
+  never cached, because a feed changes whenever it likes and offers no
+  `ETag` to lean on. `file://` is refused with a message saying why rather
+  than half-supported, per finding 13. Both sources may be configured at
+  once, or either alone; a source with no URL is removed at compile time
+  rather than registered and failing on every call.
+- Calendar **tasks** (`calendar_list_tasks`, `calendar_get_task`), Phase 2:
+  VTODO through the same contract and mapper, open by default, no date
+  range required, ordered by due date with undated tasks last. Two
+  things were settled against real task data rather than guessed at.
+  **Finding 12 is corrected**: the original result that VTODO filtering
+  behaves identically with and without `<time-range>` held only for
+  tasks whose `DUE` fell inside the tested window — with tasks that
+  straddle it, Radicale returns all five without a range and three with
+  one, and undated tasks escape the filter entirely. Tasks are now
+  fetched *without* a range and filtered client-side, the only shape
+  that behaves the same on every server. And the **YAGNI #3 cursor
+  question** is settled: the cursor anchors to `(due, id)` with undated
+  tasks last, because undated tasks are common and requiring a range
+  would exclude exactly the rows a caller most wants. Two silent bugs
+  came out of the task work, both in shared code: `Component::select()`
+  takes one name and silently ignored a second, so a TZID guard written
+  for events was checking events only and *not* tasks; and sabre coerces
+  a non-numeric `PERCENT-COMPLETE` to `0`, so a task could report 0%
+  complete having never said so. Also fixes a latent `YamlToolRegistrar`
+  bug this work exposed: a tool with no required parameters passed
+  `required: null`, which the MCP validator rejects on every call —
+  invisible until the first tool that required nothing.
+- `calendar_get_event`, closing CalDAV events: it takes either an id
+  from a listing (which fetches exactly that occurrence) or a plain
+  series UID (which expands the series). Both behaviours were caught
+  wrong by running them: the occurrence lookup was returning the
+  neighbours its deliberately-wide server-side window also matched, and
+  the plain-UID window was anchored on "now", so a historical series
+  expanded to nothing — and the 366-day clamp then truncated a
+  two-year window into one that ended in the past, so both anchors
+  returned empty. It now anchors on the series' own `DTSTART`.
+  `CALDAV_CALENDARS` is also live rather than inert: it is the exposure
+  boundary, so it fails closed and logs any entry that matched no
+  discovered calendar, alongside the calendars the server did offer.
+  Adds `CalDavLiveTest`, which runs the read path against a real server
+  when `CALDAV_LIVE_URL` is set and skips otherwise, and documents the
+  calendar tools in the README — including that Google Calendar is not
+  supported, since its CalDAV endpoint no longer accepts Basic auth.
 - `docs/design/EMAIL.md`: design draft for the email tool family — read-
   first IMAP through `directorytree/imapengine` (pure PHP, so no
   `ext-imap`, which is not thread-safe) with **every operation gated by a

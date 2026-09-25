@@ -1,0 +1,15 @@
+# Calendar task lookup tool — one task by id.
+name: calendar_get_task
+description: >
+  Fetch a single calendar task by its id (the id from a task listing, which
+  is also its uid). Timestamps are already expressed in the deployment's
+  timezone, and the timezone name is repeated in the response. A due date is
+  either a timestamp in that timezone, or a plain date when the task has no
+  time of day, in which case due_is_date is true. Each entry reports whether
+  it is read-only. An unknown id is an error naming it, not an empty result.
+handler: App\Tool\Calendar\GetTaskTool::getTask
+parameters:
+  id:
+    type: string
+    description: 'The id (uid) of the task, as returned by calendar_list_tasks.'
+    required: true
