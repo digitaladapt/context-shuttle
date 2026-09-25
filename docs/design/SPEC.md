@@ -53,7 +53,7 @@ config/tools/*.yaml
 | Decision | Rationale |
 |---|---|
 | The official `mcp/sdk`, not the `php-mcp/server` fork | Upstream is unmaintained (last push 2025-08-09); the official SDK is its successor, maintained with the PHP Foundation and Symfony. The SDK is also PSR-7 in / PSR-7 out rather than a socket-owning server, which fits a Symfony request cycle. Full reasoning: `MCP_SDK_MIGRATION.md`. |
-| Cache-backed MCP sessions | The SDK requires a session for every non-`initialize` request. `Psr16SessionStore` over a dedicated `cache.mcp_sessions` pool carries the handshake across PHP requests. |
+| Cache-backed MCP sessions | The SDK requires a session for every non-`initialize` request. `Psr16SessionStore` over a dedicated `mcp_sessions` pool carries the handshake across PHP requests. |
 | REST routes through the MCP pipeline | `POST /tools/{name}` runs the same `Server::run()` path on a session minted for the request — validation, argument casting, error mapping and logging are identical across protocols by construction. |
 | YAML validated at compile time | A compiler pass (`ToolRegistryPass`) loads `config/tools/*.yaml` during container compilation; bad YAML fails boot, never a request. |
 | Manual JSON Schemas | `Builder::addTool()` accepts an explicit `inputSchema` — the YAML `parameters` block becomes the tool's JSON Schema verbatim. |
@@ -74,7 +74,7 @@ library, not a design choice worth preserving: the spec requires the handshake,
 and a client that skips it cannot be distinguished from one that lost its
 session.
 
-Sessions live in `cache.mcp_sessions`, so the handshake spans requests. For a
+Sessions live in the `mcp_sessions` cache pool, so the handshake spans requests. For a
 multi-worker deployment, point that pool at a shared backend (`cache.adapter.redis`);
 a per-worker in-memory adapter would break any client whose second request
 lands on a different worker.

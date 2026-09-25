@@ -26,7 +26,7 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
   without a prior `initialize` is refused with `400` / `-32600`. v1.0.0 minted
   a throwaway session per request, which meant it served clients that never
   performed the handshake; that was an artifact of the old library. Sessions
-  are stored in the new `cache.mcp_sessions` pool so the handshake spans PHP
+  are stored in the new `mcp_sessions` pool so the handshake spans PHP
   requests. Point that pool at a shared backend for multi-worker deployments.
 
 - **Tool failures keep their messages.** The SDK replaces any exception other
@@ -48,7 +48,7 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 - `docs/design/MCP_SDK_VERSION_CHECK.md` — the monthly `mcp/sdk` update check,
   and the list of SDK APIs this project depends on.
-- `cache.mcp_sessions` cache pool for MCP session storage.
+- `mcp_sessions` cache pool for MCP session storage.
 - `tests/Integration/McpSessionTrait.php` — shared handshake helper for tests.
 - Test coverage for session enforcement, and a regression test asserting a
   tool's own error message reaches the client.

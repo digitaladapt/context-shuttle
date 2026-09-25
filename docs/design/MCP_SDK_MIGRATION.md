@@ -106,7 +106,7 @@ req1 initialize  → 200, Mcp-Session-Id: 6708bbee…
 req2 tools/call  → 200  (fresh Server, session resolved from cache)
 ```
 
-A dedicated `cache.mcp_sessions` pool keeps MCP sessions out of `cache.app`,
+A dedicated `mcp_sessions` pool keeps MCP sessions out of `cache.app`,
 so the pool can be cleared or moved to Redis without collateral.
 
 > **Consequence for tests and clients.** `POST /mcp` with `tools/call` and no
@@ -230,7 +230,7 @@ document carries the full checklist:
 ## Ordering (as implemented)
 
 1. `composer.json`: dropped the `repositories` VCS block and `php-mcp/server`,
-   added `mcp/sdk: 0.8.1` and `psr/simple-cache`; added the `cache.mcp_sessions`
+   added `mcp/sdk: 0.8.1` and `psr/simple-cache`; added the `mcp_sessions`
    pool.
 2. `YamlToolRegistrar` + `McpServerFactory` — server assembly first, since
    nothing else can be tested until a server builds.
@@ -247,27 +247,72 @@ document carries the full checklist:
 
 ## Verification
 
-The three gates from AGENTS.md — `php bin/phpunit`,
-`vendor/bin/phpstan analyse`, `vendor/bin/php-cs-fixer fix --dry-run --diff` —
-run in CI. They could not be run in the sandbox this work was done in (no
-PHP 8.5, no Docker daemon), so every SDK interaction was instead **executed**
-against `mcp/sdk` 0.8.1 on PHP 8.4 before being written down.
+**Status: green.** CI passed every step — composer validate, composer audit,
+conformance, php-cs-fixer, PHPStan, and 219 tests / 655 assertions at 78.18%
+line coverage.
 
-That process is worth keeping, because it caught four things that reading the
-docs would not have: the localhost-only middleware, the discarded tool error
-messages, the `200`/`-32700` parse-error status, and a duplicated `Host` header
-in the Symfony→PSR-7 conversion (from passing both `server->all()` and the
-header bag to Guzzle's factory). It also confirmed the design end to end — the
-migrated `McpServerFactory` and `YamlToolRegistrar` driving a real tool service
-resolved from a container, returning structured content, with both log paths
-firing.
+The gates in AGENTS.md could not be run in the environment this work was done
+in (no PHP 8.5, no Docker daemon), so verification happened in two stages that
+between them caught eight defects.
 
-Covered by execution: builder assembly, container-backed `[class, method]`
+### Stage one: execute against the real SDK
+
+`mcp/sdk` 0.8.1 was installed under PHP 8.4 and every interaction was run
+before being written down. This caught four things reading the docs would not
+have:
+
+- the localhost-only `DnsRebindingProtectionMiddleware`,
+- the discarded tool error messages,
+- the `200`/`-32700` parse-error status,
+- a duplicated `Host` header in the Symfony→PSR-7 conversion (passing both
+  `server->all()` and the header bag to Guzzle's factory sends it twice).
+
+It also confirmed the design end to end: the migrated `McpServerFactory` and
+`YamlToolRegistrar` driving a real tool service resolved from a container,
+returning structured content, with both log paths firing.
+
+Covered this way: builder assembly, container-backed `[class, method]`
 handlers, `inputSchema` round-trip, `initialize` → `tools/call` with
 `Mcp-Session-Id`, cross-instance session persistence through `Psr16SessionStore`,
 `-32602` on bad arguments, `-32700` on malformed JSON, the `middleware: []` fix,
 both event classes, the `ToolCallException` translation, and the
 Symfony→PSR-7→Symfony round trip.
+
+### Stage two: CI, on a real environment
+
+Four more defects only surfaced there, and each is worth remembering because
+none is a stylistic nit:
+
+1. **A hand-edited `composer.json` with a stale lock.** `composer validate
+   --strict` refuses to proceed. Regenerating the lock also dropped
+   `php-mcp/server`, `php-mcp/schema`, `react/http` and `fig/http-message-util`
+   — the abandoned fork and the ReactPHP tree it dragged in.
+
+2. **A cache pool is registered under its bare name.** A
+   `framework.cache.pools` entry named `mcp_sessions` creates the service
+   `mcp_sessions`, not `cache.mcp_sessions`. The container fails to compile
+   with the misleading-but-helpful "Did you mean this?" — a good argument for
+   never guessing a service id.
+
+3. **A Symfony cache pool is PSR-6, not PSR-16.** The SDK's
+   `Psr16SessionStore` wants PSR-16, so the type-hint had to be
+   `CacheItemPoolInterface` with the `Psr16Cache` wrap done once inside the
+   factory. Correcting only the id would have moved the failure one step later
+   without fixing it.
+
+4. **PHPStan correctly called a catch clause dead.**
+   `ReferenceHandlerInterface::handle()` declares only
+   `@throws InvalidArgumentException|RegistryException`. A `ToolCallException`
+   does reach the wrapper — thrown by the *tool*, inside the handler — but no
+   signature says so, which is exactly the kind of unstated assumption the
+   checker exists to surface. The guard moved into the catch body.
+
+Two further CI findings were legitimate but mechanical: three files needing
+`global_namespace_import` (fixed by running the project's own
+`.php-cs-fixer.dist.php` locally, so the fix matched CI exactly), and one
+missed handshake in `AlertsPipelineTest` — which lives in a different file from
+the other two session-dependent suites, and is precisely why the shared
+`McpSessionTrait` exists.
 
 ## Rollback
 
