@@ -31,13 +31,13 @@ var
 *.sqlite3
 *.db
 # Dev artifacts & host-side files not needed at runtime
+# (templates/ is NOT ignored: the /ask form renders from it at runtime.)
 tests
 vendor
 node_modules
 importmap.php
 assets
 translations
-templates
 migrations
 docs
 compose.yaml

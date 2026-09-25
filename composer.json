@@ -19,6 +19,7 @@
         "symfony/http-client": "8.1.*",
         "symfony/monolog-bundle": "^4.1",
         "symfony/runtime": "8.1.*",
+        "symfony/twig-bundle": "8.1.*",
         "symfony/validator": "8.1.*",
         "symfony/yaml": "8.1.*"
     },

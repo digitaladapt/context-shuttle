@@ -1,6 +1,9 @@
 # ALERTS — context-shuttle
 
-**Status:** planning (v0.3 draft, revised after three review rounds) · supersedes nothing ·
+**Status:** Phase 0 (`send_alert`) and Phase 1 (interactive plumbing:
+store, `/ask` form, `/inputs/{id}`) implemented · Phase 2
+(`ask_user`, `ask_user_confirm`, `get_user_answer`) pending · design
+v0.3, revised after three review rounds · supersedes nothing ·
 sibling docs: `SPEC.md`, `DESIGN_CONSIDERATIONS.md`, `ROADMAP.md`
 
 ## Goal

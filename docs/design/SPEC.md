@@ -16,7 +16,15 @@ One execution pipeline, one validation layer, one structured invocation log.
 
 ## Non-goals (v1)
 
+> **Update (alerts Phase 1):** the "no templating, no Twig, no frontend"
+> non-goal below was predicated on "no user interface". The interactive
+> alerts flow adds exactly one server-rendered page — the single-use
+> `/ask/{id}` answer form — and Twig is the framework-blessed way to
+> render it. See `docs/design/ALERTS.md`; the v1 tool surface itself
+> remains UI-free (the form is not a tool).
+
 - No templating, no Twig, no frontend (api-gateway archetype, §3.2.1).
+  Exception: the single `/ask/{id}` page (see above).
 - No authn/authz on tool endpoints (single-tenant deployment behind a
   reverse proxy; see ROADMAP).
 - No persistent MCP sessions (stateless per request by design).

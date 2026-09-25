@@ -34,8 +34,9 @@ on, including the ability to notice and undo it.
 
 ## Near term
 
-- **Alerts tool family** (`send_alert` shipped; `ask_user` /
-  `ask_user_confirm` + `get_user_answer` next): provider-backed
+- **Alerts tool family** (`send_alert` shipped; Phase 1 plumbing — store,
+  `/ask` form, `/inputs/{id}` — shipped; `ask_user` / `ask_user_confirm` +
+  `get_user_answer` next): provider-backed
   notifications (ntfy, Discord) with a 5-level priority model and
   bounded visible-link formatting; providers enabled by config
   presence (either or both), self-hosted ntfy supported; interactive

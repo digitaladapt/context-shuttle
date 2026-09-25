@@ -8,6 +8,30 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Interactive-request plumbing (alerts Phase 1)**: the provider-free
+  half of the `ask_user` family, per `docs/design/ALERTS.md`.
+  - `GET /ask/{id}` — the single-use answer page (Twig, no JS, no
+    login): the id *is* the capability, so a cross-site request has
+    nothing to submit to and no session or CSRF token is needed. Text
+    requests render a textarea, confirm requests render labelled
+    buttons; answered/expired/not-found each render their own state.
+  - `POST /ask/{id}` — records the answer and redirects back (303) so
+    a reload never re-submits. Single-use: a second answer is refused
+    (409) and the first wins; answers after expiry are refused (410)
+    and nothing is stored.
+  - `GET /inputs/{id}` — the harness-facing status endpoint (plain
+    JSON, `no-store`), deliberately outside the tool pipeline so
+    machine polling never floods the `mcp_invocation` log. Returns
+    `pending` / `answered` / `expired` / `not_found`; short-poll only.
+  - `PendingRequestStore` — cache-backed (dedicated
+    `interactive_requests` pool), because TTL semantics are the model:
+    128-bit URL-safe single-use ids minted by `PendingRequestId`,
+    hashed into the cache key so the capability never sits in a
+    backend's key space, lazy expiry on read with an hour of grace
+    before physical eviction, and `pending` → `answered` move-once
+    semantics.
+  - Adds `symfony/twig-bundle` for the one page; `templates/` is no
+    longer `.dockerignore`d now that it is runtime content.
 - `docs/design/ROADMAP.md` now records the **decided integration roster**
   and the selection rule behind it: where a service already ships a usable
   MCP server, use it (directly from the harness, or mirrored into the YAML

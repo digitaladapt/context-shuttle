@@ -86,6 +86,12 @@ services:
             - '../src/Tool/Alerts/OutboundAlert.php'
             - '../src/Tool/Alerts/DeliveryReceipt.php'
             - '../src/Tool/Alerts/DispatchReport.php'
+            # Interactive-request value types: plain data, not services.
+            - '../src/Alerts/PendingRequest.php'
+            - '../src/Alerts/PendingRequestId.php'
+            - '../src/Alerts/RequestType.php'
+            - '../src/Alerts/RequestStatus.php'
+            - '../src/Alerts/AnswerResult.php'
 
     # ── Controllers ────────────────────────────────────────────────────
     App\Mcp\McpController:

@@ -126,6 +126,17 @@ deployment model; a persistent-session mode is a roadmap item (see
 | GET | `/openapi.json` | Generated OpenAPI 3.1 spec |
 | GET | `/health` | Liveness (no dependencies) |
 | GET | `/ready` | Readiness (tool registry loaded) |
+| GET | `/ask/{id}` | Answer page for an interactive request (single-use, expiring) |
+| POST | `/ask/{id}` | Submit an answer (`answer` field; text or yes/no) |
+| GET | `/inputs/{id}` | Interactive-request status as JSON — for harness polling |
+
+`/ask/{id}` and `/inputs/{id}` sit **outside the tool pipeline** on purpose:
+`/ask` is the human surface (the single form page), and `/inputs` is the
+harness surface — a machine polling it every few seconds must not flood the
+`mcp_invocation` log. The id is the capability (128 random bits, URL-safe,
+single-use, expiring); `/inputs/{id}` returns `{status, type, question,
+expires_at[, answer, answered_at]}`, where `status` is `pending`,
+`answered`, `expired`, or `not_found`.
 
 ## Observability
 

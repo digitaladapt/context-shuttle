@@ -15,5 +15,15 @@ framework:
         #app: cache.adapter.apcu
 
         # Namespaced pools use the above "app" backend by default
-        #pools:
-            #my.dedicated.cache: null
+        pools:
+            # Interactive-request store (PendingRequestStore).
+            #
+            # A dedicated pool rather than cache.app so pending requests can
+            # be flushed, relocated to Redis, or expired on their own schedule
+            # without disturbing the application cache. Records carry their own
+            # TTL (request lifetime + grace), and the logical expiry check
+            # happens on read, so any backend with TTL support works — switch
+            # to `cache.adapter.redis` for multi-worker deployments, same as
+            # any other cache-backed store.
+            interactive_requests:
+                adapter: cache.adapter.filesystem
