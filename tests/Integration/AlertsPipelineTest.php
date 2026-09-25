@@ -23,6 +23,8 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
  */
 final class AlertsPipelineTest extends WebTestCase
 {
+    use McpSessionTrait;
+
     /** @var array<string, string|false> */
     private array $previousEnv = [];
 
@@ -79,13 +81,13 @@ final class AlertsPipelineTest extends WebTestCase
     public function test_mcp_tools_list_includes_send_alert(): void
     {
         $client = self::createClient();
-        $client->request('POST', '/mcp', server: [
-            'CONTENT_TYPE' => 'application/json',
-            'HTTP_ACCEPT' => 'application/json, text/event-stream',
-        ], content: '{"jsonrpc":"2.0","id":2,"method":"tools/list"}');
+
+        // tools/list needs an established session; handshake first.
+        $sessionId = $this->initializeMcpSession($client);
+        $this->mcpRequest($client, $sessionId, '{"jsonrpc":"2.0","id":2,"method":"tools/list"}');
 
         self::assertResponseIsSuccessful();
-        $data = json_decode((string) $client->getResponse()->getContent(), true);
+        $data = $this->jsonRpcResponse($client);
 
         $names = array_column($data['result']['tools'], 'name');
         self::assertContains('send_alert', $names);

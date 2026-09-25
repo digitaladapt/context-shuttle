@@ -4,157 +4,139 @@ declare(strict_types=1);
 
 namespace App\Mcp;
 
-use GuzzleHttp\Psr7\ServerRequest;
-use PhpMcp\Schema\JsonRpc\BatchRequest;
-use PhpMcp\Schema\JsonRpc\Notification;
-use PhpMcp\Schema\JsonRpc\Parser;
-use PhpMcp\Schema\JsonRpc\Request as JsonRpcRequest;
-use Psr\Http\Message\ServerRequestInterface;
-use Symfony\Component\HttpFoundation\JsonResponse;
+use GuzzleHttp\Psr7\HttpFactory;
+use Mcp\Server;
+use Mcp\Server\Transport\StreamableHttpTransport;
+use Psr\Http\Message\ResponseInterface as PsrResponseInterface;
+use Psr\Http\Message\ServerRequestInterface as PsrRequestInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Throwable;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
- * MCP-over-HTTP endpoint (streamable HTTP, JSON response mode).
+ * MCP-over-HTTP endpoint (streamable HTTP).
  *
- * POST /mcp accepts one JSON-RPC request (or batch); the response is the
- * matching JSON-RPC response. Sessions are handled statelessly per request:
- * initialize requests mint a session that lives for the duration of that
- * HTTP request (modern spec allows stateless servers).
+ * `POST /mcp` takes one JSON-RPC request (or batch) and answers with the
+ * matching response; `DELETE` ends a session. Sessions are real and persist
+ * across requests, so a client must `initialize` before its first `tools/call`
+ * — see docs/design/MCP_SDK_MIGRATION.md.
+ *
+ * The work is split with the SDK along the line it draws: this controller does
+ * HTTP (Symfony request → PSR-7 → back), and the SDK does protocol (parsing,
+ * dispatch, validation, session bookkeeping). The controller therefore holds no
+ * JSON-RPC knowledge at all — no id handling, no error-code table, no media-type
+ * negotiation — which is most of what the previous implementation had to do by
+ * hand.
  */
 final class McpController
 {
     public function __construct(
-        private McpServerFactory $factory,
+        private readonly McpServerFactory $factory,
+        private readonly HttpFactory $httpFactory = new HttpFactory(),
     ) {
     }
 
     public function __invoke(Request $request): Response
     {
         if ('OPTIONS' === $request->getMethod()) {
-            // Handled before routing by CorsSubscriber; kept as a fallback.
-            return new Response(status: 204);
+            // Answered earlier by CorsSubscriber; kept as a fallback so the
+            // route never 405s a preflight.
+            return new Response(status: Response::HTTP_NO_CONTENT);
         }
 
-        if ('POST' !== $request->getMethod()) {
-            return new JsonResponse([
-                'jsonrpc' => '2.0',
-                'error' => [
-                    'code' => -32601,
-                    'message' => 'Method not allowed. Use POST with JSON-RPC payloads; OPTIONS for CORS.',
-                ],
-                'id' => null,
-            ], Response::HTTP_METHOD_NOT_ALLOWED);
-        }
-
-        if (!$this->acceptsJson($request)) {
-            return new JsonResponse([
-                'jsonrpc' => '2.0',
-                'error' => [
-                    'code' => -32600,
-                    'message' => 'Not Acceptable: client must accept application/json or text/event-stream.',
-                ],
-                'id' => null,
-            ], Response::HTTP_NOT_ACCEPTABLE);
-        }
-
-        $content = $request->getContent();
-        if ('' === $content) {
-            return $this->jsonRpcError(-32600, 'Empty request body.', null, Response::HTTP_BAD_REQUEST);
-        }
-
-        try {
-            $message = Parser::parse($content);
-        } catch (Throwable $e) {
-            return $this->jsonRpcError(-32700, 'Parse error: '.$e->getMessage(), null, Response::HTTP_BAD_REQUEST);
-        }
-
-        if (!$message instanceof JsonRpcRequest && !$message instanceof Notification && !$message instanceof BatchRequest) {
-            return $this->jsonRpcError(-32600, 'Invalid Request: unsupported message type.', null, Response::HTTP_BAD_REQUEST);
-        }
-
-        // Statelessness strategy: every request gets a fresh session. An
-        // initialize request marks it initialized; every other request is
-        // also marked initialized so tools/call works without a handshake.
-        $sessionId = bin2hex(random_bytes(16));
-
-        $stack = $this->factory->build();
-        $transport = new CaptureTransport();
-        $stack->protocol->bindTransport($transport);
-
-        $stack->sessionManager->createSession($sessionId);
-
-        $context = [
-            'is_initialize_request' => $message instanceof JsonRpcRequest && 'initialize' === $message->method,
-            'stateless' => true,
-            'request' => $this->toPsr7($request),
-        ];
-
-        try {
-            $stack->protocol->processMessage($message, $sessionId, $context);
-        } catch (Throwable $e) {
-            $id = $message instanceof JsonRpcRequest ? $message->id : null;
-
-            return $this->jsonRpcError(-32603, 'Internal error: '.$e->getMessage(), $id, Response::HTTP_OK);
-        } finally {
-            $stack->sessionManager->deleteSession($sessionId);
-        }
-
-        $response = $transport->lastMessage();
-
-        if (null === $response) {
-            // Notification-only payloads correctly have no response.
-            return new Response(status: 202);
-        }
-
-        return new Response(
-            json_encode($response, \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE)."\n",
-            Response::HTTP_OK,
-            ['Content-Type' => 'application/json'],
-        );
-    }
-
-    private function acceptsJson(Request $request): bool
-    {
-        $accept = (string) $request->headers->get('Accept', '');
-
-        return '' === $accept
-            || str_contains($accept, 'application/json')
-            || str_contains($accept, 'text/event-stream')
-            || str_contains($accept, '*/*');
-    }
-
-    private function toPsr7(Request $request): ServerRequestInterface
-    {
-        $protocolVersion = '1.1';
-        if (preg_match('#^HTTP/(\d\.\d)$#', $request->server->get('SERVER_PROTOCOL', ''), $m)) {
-            $protocolVersion = $m[1];
-        }
-
-        $headers = array_map(
-            static fn (array $values): array => array_values(array_map('strval', array_filter($values, static fn ($v) => null !== $v))),
-            $request->headers->all(),
+        $psrResponse = $this->factory->build()->run(
+            new StreamableHttpTransport(
+                $this->toPsr7($request),
+                // The SDK's default edge stack includes DNS-rebinding
+                // protection whose allowlist is localhost-only, which would
+                // reject every request in production. CORS is owned by
+                // CorsSubscriber and host validation by the reverse proxy.
+                middleware: [],
+            ),
         );
 
-        return new ServerRequest(
+        return $this->toSymfony($psrResponse);
+    }
+
+    /**
+     * Symfony request → PSR-7.
+     *
+     * Built from the request's own parts rather than through
+     * `symfony/psr-http-message-bridge`, which is not installed and would add a
+     * dependency for a conversion of one method's length.
+     */
+    private function toPsr7(Request $request): PsrRequestInterface
+    {
+        // `server->all()` already carries Host among the CGI variables, and
+        // Guzzle's factory derives the Host header from the URI, so passing
+        // both would send it twice — which the SDK's header handling rejects as
+        // a repeated header rather than a duplicate value.
+        $serverParams = $request->server->all();
+        unset($serverParams['HTTP_HOST']);
+
+        $psr = $this->httpFactory->createServerRequest(
             $request->getMethod(),
             $request->getUri(),
-            $headers,
-            $request->getContent(),
-            $protocolVersion,
+            $serverParams,
         );
+
+        foreach ($request->headers->all() as $name => $values) {
+            if ('host' === strtolower($name)) {
+                continue;
+            }
+
+            foreach ($values as $value) {
+                $psr = $psr->withAddedHeader($name, $value);
+            }
+        }
+
+        $body = $request->getContent();
+        if ('' !== $body) {
+            $psr = $psr->withBody($this->httpFactory->createStream($body));
+        }
+
+        return $psr;
     }
 
-    private function jsonRpcError(int $code, string $message, int|string|null $id, int $status): JsonResponse
+    /**
+     * PSR-7 response → Symfony response.
+     *
+     * Streamed bodies are wrapped rather than read, so an SSE response is
+     * forwarded as it is produced instead of buffered until the handler
+     * finishes.
+     */
+    private function toSymfony(PsrResponseInterface $response): Response
     {
-        return new JsonResponse([
-            'jsonrpc' => '2.0',
-            'error' => [
-                'code' => $code,
-                'message' => $message,
-            ],
-            'id' => $id,
-        ], $status);
+        $headers = [];
+        foreach ($response->getHeaders() as $name => $values) {
+            $headers[$name] = implode(', ', $values);
+        }
+
+        $status = $response->getStatusCode();
+        $body = $response->getBody();
+
+        if (!$body->isSeekable() && !$response->hasHeader('Content-Length')) {
+            return new StreamedResponse(
+                static function () use ($body): void {
+                    while (!$body->eof()) {
+                        echo $body->read(8192);
+
+                        if (\function_exists('flush')) {
+                            flush();
+                        }
+                    }
+                },
+                $status,
+                $headers,
+            );
+        }
+
+        // Rewind if we can: a PSR-7 stream may have been read to determine
+        // its length upstream.
+        if ($body->isSeekable()) {
+            $body->rewind();
+        }
+
+        return new Response((string) $body, $status, $headers);
     }
 }
