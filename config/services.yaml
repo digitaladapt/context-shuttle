@@ -117,7 +117,8 @@ services:
             $container: '@service_container'
             $logger: '@logger'
             $eventDispatcher: '@event_dispatcher'
-            $sessionCache: '@cache.mcp_sessions'
+            # Pool name as Symfony registers it, NOT 'cache.<name>'.
+            $sessionPool: '@mcp_sessions'
 
     # One structured log line per tool invocation. Hangs off the application
     # dispatcher — the same one handed to the SDK as its PSR-14 dispatcher — so

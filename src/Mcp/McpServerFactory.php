@@ -8,6 +8,7 @@ use Mcp\Capability\Registry\ReferenceHandler;
 use Mcp\Server;
 use Mcp\Server\Session\Psr16SessionStore;
 use Mcp\Server\Session\SessionManager;
+use Psr\Cache\CacheItemPoolInterface;
 use Psr\Container\ContainerInterface;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\LoggerInterface;
@@ -26,18 +27,26 @@ use Symfony\Component\Cache\Psr16Cache;
  * They are backed by a dedicated cache pool rather than an in-memory store,
  * because the handshake (`initialize` → later `tools/call`) legitimately spans
  * two PHP requests, under FrankenPHP as much as under any other SAPI.
+ *
+ * The pool is built once and shared, so every call site sees the same store.
  */
 final class McpServerFactory
 {
     /** One hour, matching the SDK's documented default. */
     private const SESSION_TTL_SECONDS = 3600;
 
+    private ?Psr16SessionStore $sessionStore = null;
+
+    /**
+     * @param CacheItemPoolInterface $sessionPool the `mcp_sessions` cache pool
+     *                                            (PSR-6; adapted for the SDK below)
+     */
     public function __construct(
         private readonly YamlToolRegistrar $registrar,
         private readonly ContainerInterface $container,
         private readonly LoggerInterface $logger,
         private readonly EventDispatcherInterface $eventDispatcher,
-        private readonly Psr16Cache $sessionCache,
+        private readonly CacheItemPoolInterface $sessionPool,
         private readonly string $serverName,
         private readonly string $serverVersion,
     ) {
@@ -58,7 +67,7 @@ final class McpServerFactory
             ->setLogger($this->logger)
             ->setEventDispatcher($this->eventDispatcher)
             // Keeps tool-authored error messages in front of the caller; see
-            // the class docblock for why the SDK needs help with this.
+            // ToolFailureTranslatingReferenceHandler for why the SDK needs help.
             ->setReferenceHandler(new ToolFailureTranslatingReferenceHandler(
                 new ReferenceHandler($this->container),
             ))
@@ -72,17 +81,20 @@ final class McpServerFactory
     /**
      * Backing store for MCP sessions.
      *
-     * A named pool (`cache.mcp_sessions`) rather than `cache.app`, so sessions
-     * can be flushed, relocated to Redis, or given their own TTL without
-     * disturbing the application cache.
+     * The SDK's `Psr16SessionStore` wants PSR-16, while a Symfony cache pool is
+     * PSR-6, so the pool is adapted here rather than at every call site.
+     *
+     * The pool itself is a named one (`mcp_sessions`) rather than `cache.app`,
+     * so sessions can be flushed, relocated to Redis, or expired on their own
+     * schedule without disturbing the application cache.
      */
     public function sessionStore(): Psr16SessionStore
     {
-        return new Psr16SessionStore(
-            cache: $this->sessionCache,
+        return $this->sessionStore ??= new Psr16SessionStore(
+            cache: new Psr16Cache($this->sessionPool),
             prefix: 'mcp-session-',
-            // Bounds the cache, not the protocol: the SDK's own
-            // SessionManager expiry is what decides protocol-level lifetime.
+            // Bounds the cache, not the protocol: the SDK's own SessionManager
+            // expiry is what decides protocol-level session lifetime.
             ttl: self::SESSION_TTL_SECONDS,
         );
     }
