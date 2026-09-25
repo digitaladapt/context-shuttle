@@ -19,6 +19,20 @@ parameters:
     env(DISCORD_WEBHOOK_URL): ''
     env(DISCORD_MENTION_USER_ID): ''
 
+    env(IMAP_HOST): ''
+    env(IMAP_PORT): ''
+    env(IMAP_USERNAME): ''
+    env(IMAP_PASSWORD): ''
+    env(IMAP_ENCRYPTION): ''
+    env(IMAP_READ_FOLDERS): ''
+    env(IMAP_TAG_FOLDERS): ''
+    env(IMAP_MARK_FOLDERS): ''
+    env(IMAP_MOVE_SOURCE_FOLDERS): ''
+    env(IMAP_MOVE_TARGET_FOLDERS): ''
+    env(IMAP_TRASH_FOLDER): ''
+    env(IMAP_ARCHIVE_FOLDER): ''
+    env(IMAP_DELETE_FOLDER): ''
+
     # Penny-track tool configuration. Empty defaults keep tool listing
     # working on deployments without penny-track; the tool fails with a
     # clear message when invoked unconfigured.
@@ -58,6 +72,30 @@ parameters:
     discord_webhook_url: '%env(string:default::DISCORD_WEBHOOK_URL)%'
     discord_mention_user_id: '%env(string:default::DISCORD_MENTION_USER_ID)%'
 
+    # Email tool configuration. IMAP_HOST is NOT probed at boot: a mail
+    # server being down must never stop context-shuttle from starting, so
+    # the failure belongs at invocation time, with a message naming the env
+    # var. IMAP_PASSWORD may also live in the secrets vault
+    # (bin/console secrets:set IMAP_PASSWORD).
+    #
+    # The folder lists are the whole permission model: reading, tagging,
+    # marking, moving in and moving out are separate, and every write-ish
+    # one is empty (disabled) by default. IMAP_DELETE_FOLDER is an alias
+    # for IMAP_TRASH_FOLDER and takes precedence when both are set.
+    imap_host: '%env(string:default::IMAP_HOST)%'
+    imap_username: '%env(string:default::IMAP_USERNAME)%'
+    imap_password: '%env(string:default::IMAP_PASSWORD)%'
+    imap_encryption: '%env(string:default::IMAP_ENCRYPTION)%'
+    imap_port: '%env(int:default::IMAP_PORT)%'
+    imap_read_folders: '%env(string:default::IMAP_READ_FOLDERS)%'
+    imap_tag_folders: '%env(string:default::IMAP_TAG_FOLDERS)%'
+    imap_mark_folders: '%env(string:default::IMAP_MARK_FOLDERS)%'
+    imap_move_source_folders: '%env(string:default::IMAP_MOVE_SOURCE_FOLDERS)%'
+    imap_move_target_folders: '%env(string:default::IMAP_MOVE_TARGET_FOLDERS)%'
+    imap_trash_folder: '%env(string:default::IMAP_TRASH_FOLDER)%'
+    imap_archive_folder: '%env(string:default::IMAP_ARCHIVE_FOLDER)%'
+    imap_delete_folder: '%env(string:default::IMAP_DELETE_FOLDER)%'
+
     # Cross-Origin-Resource-Policy applied to every response by
     # CorsSubscriber when CORS_RESOURCE_POLICY is unset or empty
     # (same-site | same-origin | cross-origin; see .env.example).
@@ -75,10 +113,8 @@ services:
         resource: '../src/'
         exclude:
             - '../src/Kernel.php'
-            - '../src/Mcp/LoggingDispatcher.php'
-            - '../src/Mcp/McpStack.php'
-            - '../src/Mcp/YamlToolRegistrar.php'
-            - '../src/Mcp/CaptureTransport.php'
+            - '../src/Mcp/InvocationLogListener.php'
+            - '../src/Mcp/ToolFailureTranslatingReferenceHandler.php'
             - '../src/ToolRegistry/ToolDefinition.php'
             - '../src/ToolRegistry/ToolDefinitionException.php'
             - '../src/ToolRegistry/ToolLoader.php'
@@ -90,13 +126,21 @@ services:
             - '../src/Tool/Alerts/OutboundAlert.php'
             - '../src/Tool/Alerts/DeliveryReceipt.php'
             - '../src/Tool/Alerts/DispatchReport.php'
+            # Email domain value objects: construction-time types whose
+            # scalar constructors are not autowirable by design.
+            - '../src/Email/Domain/'
+            - '../src/Email/FolderNotAllowedException.php'
 
     # ── Controllers ────────────────────────────────────────────────────
     App\Mcp\McpController:
         tags: ['controller.service_arguments']
+        arguments:
+            $httpFactory: '@app.psr17_http_factory'
 
     App\Rest\ToolRestController:
         tags: ['controller.service_arguments']
+        arguments:
+            $httpFactory: '@app.psr17_http_factory'
 
     App\Rest\OpenApiController:
         tags: ['controller.service_arguments']
@@ -104,15 +148,33 @@ services:
     App\Health\HealthController:
         tags: ['controller.service_arguments']
 
+    # PSR-17 request/stream factory for the Symfony↔PSR-7 bridge in the MCP
+    # and REST controllers. Shared: it is stateless.
+    app.psr17_http_factory:
+        class: GuzzleHttp\Psr7\HttpFactory
+        public: true
+
     # ── MCP wiring ─────────────────────────────────────────────────────
-    # The factory assembles the php-mcp Protocol/Dispatcher per request;
-    # LoggingDispatcher/YamlToolRegistrar/CaptureTransport are constructed
-    # by it directly (excluded from autoregistration above).
+    # The factory assembles the official SDK's Server per request. Handlers
+    # and the reference handler are constructed by it; the logger and event
+    # dispatcher are injected.
     App\Mcp\McpServerFactory:
         arguments:
             $container: '@service_container'
             $logger: '@logger'
+            $eventDispatcher: '@event_dispatcher'
+            # Pool name as Symfony registers it, NOT 'cache.<name>'.
+            $sessionPool: '@mcp_sessions'
+
+    # One structured log line per tool invocation. Hangs off the application
+    # dispatcher — the same one handed to the SDK as its PSR-14 dispatcher — so
+    # MCP and REST invocations both pass through it.
+    App\Mcp\InvocationLogListener:
+        arguments:
             $invocationLogger: '@monolog.logger.mcp_invocation'
+        tags:
+            - { name: kernel.event_listener, event: Mcp\Event\ResponseEvent, method: onResponse }
+            - { name: kernel.event_listener, event: Mcp\Event\ErrorEvent, method: onError }
 
     # Tool handlers are resolved by the MCP library through the PSR-11
     # container at call time, so they must stay public (removable
@@ -188,6 +250,42 @@ services:
     # above; the app.alert_provider tag comes from each provider class's
     # #[AutoconfigureTag] attribute.
     App\Tool\Alerts\AlertTool:
+        public: true
+
+    # ── Email ───────────────────────────────────────────────────────────
+    # A Mailbox is created per invocation and discarded, never shared: the
+    # library holds no per-connection statics, but the connection object
+    # itself is stateful, and handing one instance to every request in a
+    # FrankenPHP worker is how a stateless gateway grows a shared socket.
+    App\Email\Imap\ImapConnectionFactory:
+        arguments:
+            $host: '%imap_host%'
+            $username: '%imap_username%'
+            $password: '%imap_password%'
+            $encryption: '%imap_encryption%'
+            $port: '%imap_port%'
+
+    # The folder gate is the permission model. Its defaults allow nothing;
+    # an empty list means the operation is refused for every folder.
+    App\Email\FolderGate:
+        arguments:
+            $readFolders: '%imap_read_folders%'
+            $tagFolders: '%imap_tag_folders%'
+            $markFolders: '%imap_mark_folders%'
+            $moveFromFolders: '%imap_move_source_folders%'
+            $moveToFolders: '%imap_move_target_folders%'
+
+    App\Email\EmailReader:
+        arguments:
+            $logger: '@monolog.logger.mcp_invocation'
+
+    App\Tool\Email\ListFoldersTool:
+        public: true
+
+    App\Tool\Email\ListEmailsTool:
+        public: true
+
+    App\Tool\Email\ReadEmailTool:
         public: true
 
     App\Tool\Alerts\NtfyProvider:

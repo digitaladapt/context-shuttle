@@ -155,6 +155,13 @@ All configuration via environment variables — see `.env.example`. Key vars:
 | `NTFY_URL` / `NTFY_TOKEN` | `https://ntfy.sh` / empty | Self-hosted ntfy server and access token |
 | `DISCORD_WEBHOOK_URL` | empty | Enable the Discord channel of `send_alert` |
 | `DISCORD_MENTION_USER_ID` | empty | User mentioned by priority-5 alerts only |
+| `IMAP_HOST` / `IMAP_USERNAME` / `IMAP_PASSWORD` | empty | Enable the email tools. Use an app password for Gmail |
+| `IMAP_PORT` / `IMAP_ENCRYPTION` | derived / `ssl` | Port defaults to 993 for `ssl`, 143 otherwise |
+| `IMAP_READ_FOLDERS` | empty | Folders `list_emails` and `read_email` may name |
+| `IMAP_TAG_FOLDERS` / `IMAP_MARK_FOLDERS` | empty | Folders `tag_email` / `mark_email_*` may change |
+| `IMAP_MOVE_SOURCE_FOLDERS` / `IMAP_MOVE_TARGET_FOLDERS` | empty | Folders `move_email` may take from / move into |
+| `IMAP_TRASH_FOLDER` / `IMAP_ARCHIVE_FOLDER` | empty | What `move_email`'s `trash` / `archive` mean |
+| `IMAP_DELETE_FOLDER` | empty | Alias for `IMAP_TRASH_FOLDER`; wins when both are set |
 | `CALDAV_URL` / `CALDAV_USERNAME` / `CALDAV_PASSWORD` | empty | Enable the `calendar_list_events` and `calendar_get_event` tools |
 | `CALDAV_CALENDARS` | empty | Optional comma-separated calendars to expose; empty means all discovered |
 | `ICS_URL` | empty | An http(s) iCalendar feed to read as a second calendar source |
@@ -164,6 +171,16 @@ All configuration via environment variables — see `.env.example`. Key vars:
 Alert channels are enabled by presence: set `NTFY_TOPIC`, `DISCORD_WEBHOOK_URL`,
 or both — every enabled channel receives every alert, and `send_alert` reports
 delivery per channel.
+
+### Email access
+
+The email tools are **gated by folder, per operation**: reading a folder does
+not grant tagging it, marking it read, or moving from it, and every write-ish
+capability is off until an operator names folders in the relevant list. An
+operation on a folder outside its list is refused with a message naming the
+variable to set. `move_email` is the only tool that removes a message from a
+folder, and it **moves** — there is no delete anywhere, because expunging a
+mailbox would also destroy messages other clients had flagged.
 
 ### Calendar access
 
