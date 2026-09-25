@@ -1,0 +1,41 @@
+# Email tagging tool — the agent's own state, kept apart from the human's.
+# Requires IMAP_HOST, IMAP_USERNAME and IMAP_PASSWORD, and the folder must
+# be named in IMAP_TAG_FOLDERS. Both REST (POST /tools/tag_email) and MCP
+# (tools/call tag_email) invoke the same handler.
+#
+# The description explains the tag/seen split on purpose: a model that does
+# not know tags exist will use mark_email_read instead, which is the
+# behaviour this tool exists to prevent.
+name: tag_email
+description: >
+  Add or remove a tag on one message — a label for tracking your own work,
+  such as "AiRead" or "NeedsReply". Tags are IMAP keywords: per-message,
+  searchable with list_emails' tagged/untagged filters, and separate from
+  the seen flag. Use tags for your own bookkeeping in preference to
+  mark_email_read: seen/unread is the human's state and every other mail
+  client shows it, so changing it destroys the unread signal they rely on.
+  Adding a tag a message already has, or removing one it does not, is not
+  an error — the result reports the tags the message has afterwards. Tags
+  may contain letters, digits, dot, underscore and hyphen, at most 64
+  characters; a leading backslash is refused, because that would name a
+  system flag rather than a tag.
+handler: App\Tool\Email\TagEmailTool::tagEmail
+parameters:
+  folder:
+    type: string
+    description: 'Folder holding the message, e.g. "INBOX". Must be one this deployment may tag — see list_email_folders.'
+    required: true
+  uid:
+    type: integer
+    description: 'The message''s uid, as shown by list_emails. Uids are per-folder, and a move changes them.'
+    required: true
+    minimum: 1
+  tag:
+    type: string
+    description: 'The label to add or remove, e.g. "AiRead". Letters, digits, dot, underscore and hyphen only; max 64 characters. Must not start with a backslash.'
+    required: true
+    pattern: '^[A-Za-z0-9._-]{1,64}$'
+  remove:
+    type: boolean
+    description: 'Remove the tag instead of adding it. Defaults to false (add).'
+    required: false

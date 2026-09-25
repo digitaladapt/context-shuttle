@@ -7,8 +7,11 @@ namespace App\Email\Imap;
 use DirectoryTree\ImapEngine\Connection\ConnectionInterface;
 use DirectoryTree\ImapEngine\Connection\Responses\Data\ListData;
 use DirectoryTree\ImapEngine\Connection\Tokens\Literal;
+use DirectoryTree\ImapEngine\Enums\ImapFlag;
+use DirectoryTree\ImapEngine\Enums\ImapSearchKey;
 use DirectoryTree\ImapEngine\FolderInterface;
 use DirectoryTree\ImapEngine\Mailbox;
+use DirectoryTree\ImapEngine\Message;
 use DirectoryTree\ImapEngine\MessageInterface;
 use DirectoryTree\ImapEngine\Support\Str;
 use RuntimeException;
@@ -376,6 +379,207 @@ final readonly class ImapClient
             static fn (array $folder): string => $folder['path'],
             $this->listFolders(),
         );
+    }
+
+    /**
+     * Add or remove a keyword on one message, and report the tags as the
+     * server has them afterwards.
+     *
+     * **`$expunge` is never `true` here, and never will be.** `flag()` takes
+     * an `$expunge` argument that runs a mailbox-wide `EXPUNGE`. The design's
+     * rule is that no `trash` → expunge follow-up ever happens: `EXPUNGE` is
+     * mailbox-wide, so honouring it could destroy mail the caller never
+     * named. The parameter is not exposed and not passed.
+     *
+     * Verified against the reference server (finding 23): `flag()` performs
+     * no validation, so a `\`-prefixed tag would set a *system* flag. The
+     * caller is responsible for handing this a validated keyword —
+     * {@see \App\Email\TagName} is that guard, and `tag_email` applies it
+     * before ever reaching here.
+     *
+     * @return list<string> the message's tags, re-read from the server
+     */
+    public function setTag(string $path, int $uid, string $tag, bool $remove): array
+    {
+        return $this->connection->with(function (Mailbox $mailbox) use ($path, $uid, $tag, $remove): array {
+            $folder = $this->findFolder($mailbox, $path);
+
+            $message = $folder->messages()->withFlags()->find($uid);
+
+            if (null === $message) {
+                throw new MessageNotFound($path, $uid);
+            }
+
+            $message->flag($tag, $remove ? '-' : '+');
+
+            return $this->keywords($this->reread($folder, $uid));
+        });
+    }
+
+    /**
+     * Set or clear `\Seen` on one message, and report the state as the
+     * server has it afterwards.
+     *
+     * The design returns "the state as verified *after* the change, not
+     * merely the intent", so the message is re-read rather than echoing what
+     * was asked for. That is one extra round trip, and it is the difference
+     * between "we issued a STORE" and "the flag is set" — the same
+     * distinction `move_email` makes about `to_folder`.
+     *
+     * `\Seen` is set by name, not through `flag()`'s system-flag laxity: this
+     * is the *only* place a system flag is written, it is deliberate, and it
+     * is gated separately (`IMAP_MARK_FOLDERS`) from tagging.
+     *
+     * @return bool the message's `seen` state, re-read from the server
+     */
+    public function setSeen(string $path, int $uid, bool $seen): bool
+    {
+        return $this->connection->with(function (Mailbox $mailbox) use ($path, $uid, $seen): bool {
+            $folder = $this->findFolder($mailbox, $path);
+
+            $message = $folder->messages()->withFlags()->find($uid);
+
+            if (null === $message) {
+                throw new MessageNotFound($path, $uid);
+            }
+
+            $message->flag(ImapFlag::Seen->value, $seen ? '+' : '-');
+
+            return $this->reread($folder, $uid)->isSeen();
+        });
+    }
+
+    /**
+     * Move one message to another folder, and report where it actually is.
+     *
+     * **Finding 26 is why this verifies by observation rather than trusting
+     * the return value.** The library's `move()` returned `NULL` on the
+     * reference server even though the move succeeded: Dovecot reports the
+     * new UID in an *untagged* `* OK [COPYUID …]`, and
+     * `MessageResponseParser::getUidFromCopy()` reads the *tagged* response,
+     * so the UID is always lost. The untagged response is not reachable
+     * through any public accessor.
+     *
+     * The design asks for exactly this anyway — `to_folder` is "the folder
+     * the message was *observed* in afterwards, not the configured value
+     * echoed back". So the move is issued, then the destination is searched
+     * for the message's `Message-ID` (`HEADER Message-ID`, which the
+     * reference server matches reliably and case-insensitively). The search
+     * is scoped to the one destination folder, so it costs one `SEARCH`
+     * against a mailbox we already have open.
+     *
+     * `$expunge` is never passed, for the reason given on
+     * {@see self::setTag()}.
+     *
+     * @return array{uid: ?int, to_folder: string, tags: list<string>}|null
+     *                                                                      null when the message is in neither folder afterwards — the move failed,
+     *                                                                      which the caller must not report as success
+     */
+    public function moveMessage(string $path, int $uid, string $destination): ?array
+    {
+        return $this->connection->with(function (Mailbox $mailbox) use ($path, $uid, $destination): ?array {
+            $source = $this->findFolder($mailbox, $path);
+
+            $message = $source->messages()->withHeaders()->withFlags()->find($uid);
+
+            if (null === $message) {
+                throw new MessageNotFound($path, $uid);
+            }
+
+            // Captured *before* the move, because after it the message is
+            // addressed by a different UID and this connection's source
+            // folder no longer holds it.
+            $messageId = $this->nullIfEmpty($message->messageId());
+
+            // `move()` is on the concrete `Message`, not on the interface
+            // this was typed against — the same shape as `hasBody()` and
+            // `folder()`. Narrowed rather than asserted, so the call is
+            // checked when it is made.
+            if (!$message instanceof Message) {
+                throw new RuntimeException('This mail server returned a message type that cannot be moved; context-shuttle expected DirectoryTree\\ImapEngine\\Message. This is a context-shuttle bug, not a problem with the mailbox.');
+            }
+
+            $newUid = $message->move($destination);
+
+            return $this->locate($mailbox, $destination, $messageId, $newUid);
+        });
+    }
+
+    /**
+     * Find a message in a folder, preferring the UID the server reported and
+     * falling back to its `Message-ID`.
+     *
+     * @return array{uid: ?int, to_folder: string, tags: list<string>}|null
+     */
+    private function locate(Mailbox $mailbox, string $destination, ?string $messageId, ?int $reportedUid): ?array
+    {
+        $folder = $mailbox->folders()->find($destination);
+
+        if (null === $folder) {
+            return null;
+        }
+
+        $folder->select(true);
+
+        // The reported UID when the server gave one (it will not, per
+        // finding 26 — but a server that does report it saves a search, and
+        // this must not silently depend on the defect continuing).
+        if (null !== $reportedUid) {
+            $found = $folder->messages()->withFlags()->find($reportedUid);
+
+            if (null !== $found) {
+                return [
+                    'uid' => $found->uid(),
+                    'to_folder' => $destination,
+                    'tags' => $this->keywords($found),
+                ];
+            }
+        }
+
+        if (null === $messageId) {
+            // A message with no `Message-ID` cannot be located after a move:
+            // ordinary for junk mail, and reporting it as moved when we
+            // cannot see it would be a guess.
+            return null;
+        }
+
+        // `HEADER` takes two arguments and the builder cannot express that
+        // through two `where()` calls — see {@see SearchValue::header()}.
+        $query = $folder->messages()->withFlags();
+        $query->where(ImapSearchKey::Header, SearchValue::header('Message-ID', $messageId));
+
+        $found = $query->first();
+
+        if (null === $found) {
+            return null;
+        }
+
+        return [
+            'uid' => $found->uid(),
+            'to_folder' => $destination,
+            'tags' => $this->keywords($found),
+        ];
+    }
+
+    /**
+     * Re-read one message's flags from the server.
+     *
+     * Deliberately a fresh query rather than trusting the in-memory copy
+     * `flag()` maintains: the design asks for verified state, and the
+     * in-memory copy is the library's own bookkeeping of what it just sent.
+     */
+    private function reread(FolderInterface $folder, int $uid): MessageInterface
+    {
+        $message = $folder->messages()->withFlags()->find($uid);
+
+        if (null === $message) {
+            // The message was there a moment ago and a flag change cannot
+            // remove it; a `null` here means another client expunged it, and
+            // saying so is better than reporting a state we cannot see.
+            throw new MessageNotFound($folder->path(), $uid);
+        }
+
+        return $message;
     }
 
     /**

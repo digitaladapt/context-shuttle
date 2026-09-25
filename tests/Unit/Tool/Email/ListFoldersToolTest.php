@@ -8,6 +8,7 @@ use App\Email\EmailReader;
 use App\Email\FolderGate;
 use App\Email\Imap\ImapClient;
 use App\Email\Imap\ImapConnectionFactory;
+use App\Email\MoveDestination;
 use App\Tests\Support\FakeImapServer;
 use App\Tool\Email\ListFoldersTool;
 use PHPUnit\Framework\TestCase;
@@ -166,7 +167,7 @@ final class ListFoldersToolTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/IMAP_HOST/');
 
-        (new ListFoldersTool($reader, $factory))->listEmailFolders();
+        (new ListFoldersTool($reader, $factory, new MoveDestination()))->listEmailFolders();
     }
 
     public function test_a_folder_that_cannot_be_measured_is_still_listed(): void
@@ -202,6 +203,10 @@ final class ListFoldersToolTest extends TestCase
             moveToFolders: $moveToFolders,
         );
 
-        return new ListFoldersTool(new EmailReader(new ImapClient($factory), $gate), $factory);
+        return new ListFoldersTool(
+            new EmailReader(new ImapClient($factory), $gate),
+            $factory,
+            new MoveDestination(),
+        );
     }
 }

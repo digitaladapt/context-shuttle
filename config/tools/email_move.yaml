@@ -1,0 +1,46 @@
+# Email move tool — the only tool that removes a message from a folder.
+# Requires IMAP_HOST, IMAP_USERNAME and IMAP_PASSWORD, the source folder in
+# IMAP_MOVE_SOURCE_FOLDERS, and either a configured destination
+# (IMAP_TRASH_FOLDER / IMAP_ARCHIVE_FOLDER) or a target in
+# IMAP_MOVE_TARGET_FOLDERS. Both REST (POST /tools/move_email) and MCP
+# (tools/call move_email) invoke the same handler.
+#
+# The description carries the "there is no delete" property explicitly: a
+# caller looking for a way to delete an email should learn from reading this
+# that the tool surface has none, and that "trash" is where they were
+# looking.
+name: move_email
+description: >
+  Move one message out of a folder into another. There is no delete in this
+  tool surface, and there is no way to expunge: IMAP's only delete is a
+  mailbox-wide expunge that would also destroy messages other clients had
+  flagged, so removing a message means moving it somewhere a human can
+  recover it. destination "trash" is the usual "delete" — it moves the
+  message to the folder this deployment configured as its trash or
+  quarantine, which a person can still open and undo. destination "archive"
+  files it away. destination "folder" moves it to a specific folder named in
+  target_folder, and is the most restricted of the three. The result reports
+  where the message was actually found afterwards (to_folder) and its new
+  uid there: a uid belongs to one folder only, so the uid you passed in is
+  not the uid it has now, and any uid you stored earlier is stale. Tags on
+  the message travel with it.
+handler: App\Tool\Email\MoveEmailTool::moveEmail
+parameters:
+  folder:
+    type: string
+    description: 'Folder the message is currently in, e.g. "INBOX". Must be one this deployment may move messages out of — see list_email_folders.'
+    required: true
+  uid:
+    type: integer
+    description: 'The message''s uid in that folder, as shown by list_emails.'
+    required: true
+    minimum: 1
+  destination:
+    type: string
+    description: 'Where to move it: "trash" (the configured trash/quarantine folder — the closest thing to delete), "archive" (the configured archive folder), or "folder" (a specific folder named in target_folder).'
+    required: true
+    enum: ['trash', 'archive', 'folder']
+  target_folder:
+    type: string
+    description: 'Required when destination is "folder": the folder to move into. Must be one this deployment may move into. Ignored for "trash" and "archive".'
+    required: false

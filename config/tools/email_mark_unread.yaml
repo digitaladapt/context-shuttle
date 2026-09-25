@@ -1,0 +1,26 @@
+# Email mark-unread tool — restore the human's unread signal.
+# Requires IMAP_HOST, IMAP_USERNAME and IMAP_PASSWORD, and the folder must
+# be named in IMAP_MARK_FOLDERS. Both REST (POST /tools/mark_email_unread)
+# and MCP (tools/call mark_email_unread) invoke the same handler.
+#
+# A separate tool from mark_email_read rather than a boolean parameter,
+# because the two are different sentences a person says — and because a
+# schema is a worse place to explain the trade-off than a name.
+name: mark_email_unread
+description: >
+  Mark one message as unread — clear the seen flag, so it looks new again
+  in every mail client. The usual reason to call this is to undo an
+  accidental reading: a client that fetched a message and marked it seen as
+  a side effect, or a change you made and want to take back. Returns the
+  seen state as the server has it after the change.
+handler: App\Tool\Email\MarkEmailTool::markEmailUnread
+parameters:
+  folder:
+    type: string
+    description: 'Folder holding the message, e.g. "INBOX". Must be one this deployment may mark — see list_email_folders.'
+    required: true
+  uid:
+    type: integer
+    description: 'The message''s uid, as shown by list_emails. Uids are per-folder, and a move changes them.'
+    required: true
+    minimum: 1

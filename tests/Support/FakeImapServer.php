@@ -40,6 +40,14 @@ final class FakeImapServer
     /** @var array<string, list<string>> folder path => LIST flags */
     private array $folders = [];
 
+    /**
+     * The UIDs that exist, so `find()` can be *refused* for the ones that do
+     * not.
+     *
+     * @var list<int>
+     */
+    private array $uids = [1];
+
     private readonly RespondingStream $stream;
 
     private readonly ImapConnection $connection;
@@ -57,11 +65,31 @@ final class FakeImapServer
         $this->on('LOGIN', ['OK']);
         $this->on('LOGOUT', ['* BYE signing off']);
 
-        // `find($uid)` resolves the UID first with a `(UID)`-only fetch, so
-        // it is answered generically here: the reply is the same shape
-        // whatever the id, and making every test restate it would bury the
-        // part each test is actually about.
-        $this->on('(UID)', ['* 1 FETCH (UID 1)']);
+        // `move()` consults capabilities first: it refuses to guess
+        // between MOVE and the UIDPLUS copy fallback, so the server has
+        // to advertise them. These are what the reference Dovecot
+        // offers.
+        $this->on('CAPABILITY', [
+            '* CAPABILITY IMAP4rev1 UIDPLUS MOVE LITERAL+ IDLE',
+        ]);
+
+        // `find($uid)` resolves the UID first with a `(UID)`-only fetch.
+        // Answering it *generically* would be a lie that hides a real
+        // failure: `find(99999)` would resolve, and the code under test would
+        // never reach its "no such message" path. So the reply echoes the id
+        // that was asked for, and only when the test declared that id exists
+        // via `message()`.
+        $this->stream->onUnmatched(function (string $command): ?array {
+            if (1 !== preg_match('/UID FETCH (\d+) \(UID\)/', $command, $matches)) {
+                return null;
+            }
+
+            $uid = (int) $matches[1];
+
+            return \in_array($uid, $this->uids, true)
+                ? [\sprintf('* %d FETCH (UID %d)', $uid, $uid)]
+                : [];
+        });
 
         // `starttls` negotiates before login. Answering it keeps the
         // encryption-mode tests offline.
@@ -102,6 +130,21 @@ final class FakeImapServer
     public function reset(string $needle): self
     {
         $this->stream->forget($needle);
+
+        return $this;
+    }
+
+    /**
+     * Declare that a message with this UID exists.
+     *
+     * `find()` on any other id is refused, which is how the "no such
+     * message" paths get exercised at all.
+     */
+    public function message(int $uid): self
+    {
+        if (!\in_array($uid, $this->uids, true)) {
+            $this->uids[] = $uid;
+        }
 
         return $this;
     }

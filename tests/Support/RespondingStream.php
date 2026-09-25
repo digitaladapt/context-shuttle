@@ -25,18 +25,24 @@ use Override;
 class RespondingStream extends FakeStream
 {
     /**
-     * Replies per command needle, each a queue consumed in order.
+     * Replies per command needle, each a queue consumed in order. The third
+     * element is the uid a reply was written for, when it names one.
      *
-     * @var array<string, list<array{0: list<string>, 1: string}>>
+     * @var array<string, list<array{0: list<string>, 1: string, 2: int|null}>>
      */
     private array $handlers = [];
 
     /**
-     * A callable that answers a command, or null to fall through.
+     * Callables that answer a command, tried in order; null falls through.
      *
-     * @var (callable(string): (list<string>|null))|null
+     * A *list* rather than a single slot: the fake server registers one for
+     * `LIST` (answered by name) and one for uid resolution (answered only
+     * for ids a test declared), and a single slot silently replaced the
+     * first with the second — which broke every folder lookup.
+     *
+     * @var list<callable(string): (list<string>|null)>
      */
-    private $fallback;
+    private array $fallbacks = [];
 
     /**
      * Register a reply for any command containing `$needle`.
@@ -54,9 +60,36 @@ class RespondingStream extends FakeStream
         $key = strtoupper($needle);
 
         $this->handlers[$key] ??= [];
-        $this->handlers[$key][] = [$lines, $status];
+        $this->handlers[$key][] = [$lines, $status, $this->uidOf($lines)];
 
         return $this;
+    }
+
+    /**
+     * The id a `UID FETCH` reply was written for, or null when it is not
+     * id-specific.
+     *
+     * @param list<string> $lines
+     */
+    private function uidOf(array $lines): ?int
+    {
+        foreach ($lines as $line) {
+            if (preg_match('/^\* \d+ FETCH \(UID (\d+)/', $line, $matches)) {
+                return (int) $matches[1];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The id a command addresses, when it addresses exactly one.
+     */
+    private function uidIn(string $command): ?int
+    {
+        return 1 === preg_match('/UID FETCH (\d+) /', $command, $matches)
+            ? (int) $matches[1]
+            : null;
     }
 
     /**
@@ -77,7 +110,7 @@ class RespondingStream extends FakeStream
      */
     public function onUnmatched(callable $fallback): self
     {
-        $this->fallback = $fallback;
+        $this->fallbacks[] = $fallback;
 
         return $this;
     }
@@ -177,17 +210,24 @@ class RespondingStream extends FakeStream
 
             // One reply per matching command, with the last repeating, so a
             // single registered reply is not order-bound.
-            [$lines, $status] = 1 === \count($queue)
+            [$lines, $status, $replyUid] = 1 === \count($queue)
                 ? $queue[0]
                 : array_shift($this->handlers[$needle]);
+
+            // A reply that names a uid answers only for that uid — see on().
+            $askedUid = $this->uidIn($command);
+
+            if (null !== $replyUid && null !== $askedUid && $replyUid !== $askedUid) {
+                continue;
+            }
 
             $this->emit($tag, $lines, $status);
 
             return;
         }
 
-        if (null !== $this->fallback) {
-            $lines = ($this->fallback)($command);
+        foreach ($this->fallbacks as $fallback) {
+            $lines = $fallback($command);
 
             if (null !== $lines) {
                 $this->emit($tag, $lines, 'OK');
