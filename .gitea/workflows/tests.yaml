@@ -33,7 +33,7 @@ jobs:
       # * xdebug
       coverage: 'pcov'
       # 0-100 percentage of test-coverage required
-      coverage-min: '0'
+      coverage-min: '50'
 
       # does failing our "conformance" check make the test suite fail
       conformance-blocking: false
