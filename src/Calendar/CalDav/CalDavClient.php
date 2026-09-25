@@ -7,6 +7,8 @@ namespace App\Calendar\CalDav;
 use App\Calendar\Domain\CalendarInfo;
 use App\Calendar\Domain\CalendarObject;
 use App\Calendar\Domain\ComponentType;
+use App\Calendar\Domain\EditableCalendar;
+use App\Calendar\Write\ConcurrentModification;
 use App\Xml\DavMultistatusParser;
 use DateTimeImmutable;
 use DateTimeZone;
@@ -36,6 +38,11 @@ final readonly class CalDavClient
      * CalDAV servers restart, and a stale keep-alive socket turns a scary
      * failure into a slow success. Sent twice, `PROPFIND` and `REPORT` have
      * no side effects.
+     *
+     * Writes are deliberately **excluded** from this — see `put()`. A `PUT`
+     * retried after a timeout can land twice, and the second landing is not
+     * the same request as the first once someone else has edited the object
+     * in between.
      */
     private const MAX_ATTEMPTS = 2;
 
@@ -51,6 +58,7 @@ final readonly class CalDavClient
         private DavMultistatusParser $parser = new DavMultistatusParser(),
         private string $allowedCalendars = '',
         private ?LoggerInterface $logger = null,
+        private EditableCalendar $editableCalendar = new EditableCalendar(''),
     ) {
     }
 
@@ -123,10 +131,21 @@ final readonly class CalDavClient
                 continue;
             }
 
+            $normalized = $this->normalizeHref($href);
+            $serverPermits = $this->parser->isWritable($response);
+
             $calendars[] = new CalendarInfo(
-                href: $this->normalizeHref($href),
+                href: $normalized,
                 name: $this->parser->displayName($response) ?? $href,
-                readonly: !$this->parser->isWritable($response),
+                // `readonly` means "these tools can edit this row", which is a
+                // narrower thing than "the server would let us". Both have to
+                // hold: the server permits writing **and** this is the one
+                // calendar the operator designated. Reporting the server's
+                // opinion alone would mark every writable calendar editable,
+                // so a caller would be told an edit was available on the four
+                // calendars these tools will refuse — in the field that exists
+                // to answer exactly that question.
+                readonly: !($serverPermits && $this->editableCalendar->matchesHref($normalized)),
             );
         }
 
@@ -222,15 +241,11 @@ final readonly class CalDavClient
      */
     private function hrefMatches(string $href, string $wanted): bool
     {
-        $trimmed = rtrim($href, '/');
-        $wantedTrimmed = rtrim($wanted, '/');
-
-        if ($trimmed === $wantedTrimmed) {
-            return true;
-        }
-
-        // `work` should match `/lyra/work/` without matching `/lyra/homework/`.
-        return basename($trimmed) === $wantedTrimmed;
+        // Shared with the write boundary rather than reimplemented: the read
+        // allowlist and the one writable calendar guard opposite ends of the
+        // same exposure, and two matchers that "obviously" agree are two
+        // matchers that eventually do not.
+        return EditableCalendar::hrefMatches($href, $wanted);
     }
 
     /**
@@ -496,6 +511,176 @@ final readonly class CalDavClient
         }
 
         return null;
+    }
+
+    /**
+     * Create or replace one calendar object, conditionally.
+     *
+     * `$ifMatch` is the etag last seen for this object and makes the write
+     * fail rather than overwrite if someone changed it in the meantime;
+     * `$mustNotExist` asserts the object is new. Exactly one is supplied per
+     * call, because a request that both requires an etag and requires absence
+     * is a request that contradicts itself.
+     *
+     * **Never retried.** The read path retries once on a transport error
+     * because a `PROPFIND` is harmless twice. A `PUT` is not: if the first
+     * attempt reached the server and only the response was lost, a retry
+     * overwrites a change that arrived in between — which is precisely the
+     * corruption `If-Match` exists to prevent, committed by our own retry
+     * logic rather than by a caller's mistake. A timed-out write therefore
+     * fails and lets the caller re-read and decide.
+     */
+    public function put(CalendarInfo $calendar, string $href, string $ics, ?string $ifMatch = null, bool $mustNotExist = false): ?string
+    {
+        $this->assertHrefWithin($href, $calendar);
+
+        $headers = [];
+        $headers['Content-Type'] = 'text/calendar; charset=utf-8';
+
+        if ($mustNotExist) {
+            $headers['If-None-Match'] = '*';
+        } elseif (null !== $ifMatch) {
+            $headers['If-Match'] = $this->quoteEtag($ifMatch);
+        }
+
+        $response = $this->sendWrite('PUT', $this->absolute($href), $ics, $headers);
+
+        $etag = $response->getHeaders(false)['etag'][0] ?? null;
+
+        return null === $etag ? null : trim($etag);
+    }
+
+    /**
+     * Remove one calendar object, conditionally.
+     *
+     * `$ifMatch` is required by the caller rather than optional here: a
+     * delete with no precondition removes whatever is at the href now, which
+     * is a different object than the one the caller decided to delete.
+     */
+    public function delete(CalendarInfo $calendar, string $href, ?string $ifMatch): void
+    {
+        $this->assertHrefWithin($href, $calendar);
+
+        $headers = [];
+
+        if (null !== $ifMatch) {
+            $headers['If-Match'] = $this->quoteEtag($ifMatch);
+        }
+
+        $this->sendWrite('DELETE', $this->absolute($href), '', $headers);
+    }
+
+    /**
+     * Present an etag the way `If-Match` requires it.
+     *
+     * Etags are stored **unquoted** throughout — `DavMultistatusParser::etag()`
+     * strips the quotes, and a `PUT` response is stripped to match, so the two
+     * agree on what an etag *is*. RFC 7232 wants the quotes on the header
+     * though, and the reference server enforces it: the same etag sends
+     * unquoted returns `412 Precondition Failed` and quoted succeeds, which is
+     * a difference that reads exactly like someone else having edited the
+     * object. Quoting here keeps the internal form clean and the wire form
+     * correct, in one place rather than at every call site.
+     */
+    private function quoteEtag(string $etag): string
+    {
+        return '"'.trim($etag, '"').'"';
+    }
+
+    /**
+     * Send one write, mapping its failure modes to their own exceptions.
+     *
+     * `412` becomes `ConcurrentModification` because it is the one failure
+     * with a specific remedy — re-read, then decide — and flattening it into
+     * a generic error would leave a caller that lost a race knowing only that
+     * writing is unreliable. `412` can also mean a failing `If-None-Match`,
+     * i.e. the object already exists, which is the same advice.
+     */
+    /**
+     * @param array<string, string> $headers
+     */
+    private function sendWrite(string $method, string $url, string $body, array $headers): ResponseInterface
+    {
+        $this->assertConfigured();
+
+        try {
+            $response = $this->httpClient->request($method, $url, [
+                'auth_basic' => [$this->username, $this->password],
+                'headers' => $headers,
+                'body' => $body,
+                'timeout' => self::TIMEOUT_SECONDS,
+            ]);
+
+            $status = $response->getStatusCode();
+        } catch (TransportExceptionInterface $e) {
+            throw new RuntimeException(\sprintf('Could not reach the calendar server at %s to write: %s', $this->baseUrl(), $e->getMessage()), 0, $e);
+        }
+
+        if (401 === $status || 403 === $status) {
+            // A misconfigured or under-privileged account, not bad data.
+            throw new RuntimeException('The calendar server rejected the write. Check that CALDAV_USERNAME has write access to the configured calendar, and that CALDAV_PASSWORD (often an app password) is current.');
+        }
+
+        if (412 === $status) {
+            $this->drain($response);
+
+            throw new ConcurrentModification('This event changed since it was read, so the change was not applied. Read it again and retry if it still needs changing.');
+        }
+
+        if (409 === $status) {
+            $this->drain($response);
+
+            throw new RuntimeException('The calendar server refused the write as a conflict. If the calendar it names does not exist, check CALDAV_EDITABLE_CALENDAR.');
+        }
+
+        if ($status >= 400) {
+            $detail = $this->safeBody($response);
+
+            throw new RuntimeException(\sprintf('The calendar server returned HTTP %d for %s.%s', $status, $method, '' === $detail ? '' : ' '.$detail));
+        }
+
+        return $response;
+    }
+
+    /**
+     * Refuse a write whose href would not land inside the target calendar.
+     *
+     * Measured: a percent-encoded `..` in a request path escapes the
+     * collection, producing an object *outside* the calendar the operator
+     * designated as the only writable one (CALENDAR-WRITES-FINDINGS §3). The
+     * server does not stop this, so the check has to be here.
+     *
+     * This is a second line of defence. The first is that hrefs are generated
+     * rather than derived from anything a caller supplies — a UID never
+     * becomes a path segment — so this method should never fire in practice,
+     * and the fact that it exists is not a reason to relax that rule.
+     */
+    private function assertHrefWithin(string $href, CalendarInfo $calendar): void
+    {
+        $path = parse_url($href, \PHP_URL_PATH);
+        $path = \is_string($path) ? $path : $href;
+
+        // Both forms: the raw text and its percent-decoded reading, because
+        // `..%2F..%2F` only becomes `../../` after decoding, and the server
+        // sees the decoded form.
+        foreach ([$path, rawurldecode($path)] as $candidate) {
+            foreach (explode('/', $candidate) as $segment) {
+                if ('..' === $segment || '.' === $segment) {
+                    throw new UnsafeHref('Refusing to write: the target path contains a relative segment, which could escape the configured calendar.');
+                }
+            }
+        }
+
+        $decodedPath = rawurldecode($path);
+        $collection = rtrim(parse_url($this->absolute($calendar->href), \PHP_URL_PATH) ?: '', '/');
+
+        if ('' === $collection) {
+            return;
+        }
+
+        if (!str_starts_with(rawurldecode($decodedPath), $collection.'/')) {
+            throw new UnsafeHref(\sprintf('Refusing to write: the target path is not inside the configured calendar (%s).', $collection.'/'));
+        }
     }
 
     /**

@@ -155,8 +155,9 @@ All configuration via environment variables — see `.env.example`. Key vars:
 | `NTFY_URL` / `NTFY_TOKEN` | `https://ntfy.sh` / empty | Self-hosted ntfy server and access token |
 | `DISCORD_WEBHOOK_URL` | empty | Enable the Discord channel of `send_alert` |
 | `DISCORD_MENTION_USER_ID` | empty | User mentioned by priority-5 alerts only |
-| `CALDAV_URL` / `CALDAV_USERNAME` / `CALDAV_PASSWORD` | empty | Enable the `calendar_list_events` and `calendar_get_event` tools |
+| `CALDAV_URL` / `CALDAV_USERNAME` / `CALDAV_PASSWORD` | empty | Enable the calendar read tools (`calendar_list_events`, `calendar_get_event`, and the task tools) |
 | `CALDAV_CALENDARS` | empty | Optional comma-separated calendars to expose; empty means all discovered |
+| `CALDAV_EDITABLE_CALENDAR` | empty | The **one** calendar the write tools may modify; **empty means those tools do not exist** |
 | `ICS_URL` | empty | An http(s) iCalendar feed to read as a second calendar source |
 | `ICS_NAME` | `ics` | Display name for the feed's synthetic calendar |
 | `TZ` | `UTC` | The timezone every calendar timestamp is rendered in, and date inputs are read in |
@@ -199,6 +200,53 @@ feed is fetched fresh on every call — nothing is cached.
 Both sources produce **identical output shapes**; the only difference a
 caller sees is that a feed's rows are read-only. That is deliberate: a
 result that revealed its own source would invite a caller to branch on it.
+
+### Calendar writes
+
+**Off unless you turn them on.** Set `CALDAV_EDITABLE_CALENDAR` to the one
+calendar writes may touch — a full href (`/user/work/`) or a bare name
+(`work`), matched the same way `CALDAV_CALENDARS` is. While it is empty, the
+`calendar_create_event`, `calendar_update_event` and `calendar_delete_event`
+tools are **not registered at all**: they do not appear in `tools/list`, so a
+model cannot attempt an edit this deployment would refuse. That is a stronger
+statement than a refusal at call time, and it is the one you can verify by
+looking. `/ready` reports the tool count, which changes when you enable them.
+
+**No write tool takes a calendar.** The target is the configured one, never
+something a caller names. A caller that could name a target could name the
+wrong one, and unlike a bad read a bad write is not recoverable.
+
+Times on the way in are wall-clock local values in `TZ` — `2026-12-01 09:30`
+for a timed event, `2026-12-01` alone for an all-day one. The offset-bearing
+form that listings *return* is deliberately refused, with a message saying
+to drop the offset, so a caller never has to reason about one in either
+direction. A wall clock that daylight saving skips is refused rather than
+silently moved.
+
+**Editing one occurrence.** `calendar_update_event` and
+`calendar_delete_event` take an `id` — the same handle a listing returns. An
+id from a listing (a `uid::occurrence` pair) changes **that occurrence** and
+leaves the rest of the series alone; a plain `uid` changes the whole series.
+There is no separate parameter for the scope, because the id already carries
+it and a second way to say it would be a second thing to get wrong. Omitting
+a field leaves it unchanged, so renaming an event does not move it; passing
+an empty string for `description` or `location` clears it.
+
+One thing that is **not** supported: "change this and all future
+occurrences". Editing a single occurrence or the whole series are the two
+supported shapes, and a request for anything between them is refused rather
+than approximated.
+
+**Concurrent edits are refused, not merged.** Every write is conditional on
+the version that was read, so if the event changed in between — in another
+client, or by someone else on a shared calendar — the write fails with a
+message saying to re-read and retry. Reading is what establishes the version;
+there is no last-write-wins.
+
+Note that `readonly` on each row means "these tools can edit this", not "the
+server would allow it". A calendar the server accepts writes for, but which
+is not the one you designated, reports `readonly: true` — because these tools
+will not touch it. This is the field to check before attempting an edit.
 
 ## Development
 

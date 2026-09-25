@@ -327,15 +327,13 @@ event** rather than nested inside the `calendar` object.
   still dropped: `readonly` is the single source of truth, and two fields
   that must always agree is a bug waiting to happen.
 
-**When writes land, `readonly` tightens to mean "*these tools* can edit this
-row"** — see *Writes*, below. Until then it keeps its present meaning (the
-server's own privilege set), because before any write tool exists "can be
-edited through this deployment" is uniformly false and would say nothing on
-any row; a field that reports the same value everywhere is worse than one
-that at least distinguishes a subscribed holiday feed from a personal
-calendar. The tightening is a *narrowing* — rows may only flip from `false`
-to `true` — and it happens at the moment the ability it describes is
-introduced.
+With writes implemented, `readonly` means "**these tools** can edit this row"
+— see *Writes*, below. It no longer reports the server's own privilege set on
+its own: a calendar the server would accept a write for, but which is not the
+one designated for writing, reads `readonly: true`, because these tools will
+not touch it. The change was a *narrowing* — rows only ever flip from `false`
+to `true`, never the reverse — and it landed with the tools that make it
+meaningful, so no deployment ever saw it say something untrue.
 
 ### `calendar_get_event`
 
@@ -433,21 +431,40 @@ write tools fail with the server's own refusal. Both conditions must hold:
 The field keeps its single value and its flat placement; no `editable`
 companion returns. One field, one question, one answer.
 
-### What is still open
+### What implementation settled
 
-Deliberately not settled here, to be decided against a real server when the
-work starts rather than guessed at now:
+The three open questions above were decided against a live server; the raw
+measurements are in `CALENDAR-WRITES-FINDINGS.md` alongside this document.
 
-- the tool names and their exact parameter sets (`calendar_create_event`,
-  `calendar_update_event`, `calendar_delete_event`, then the task
-  equivalents) — the surface is bounded by the three rules above, but the
-  wording is not yet written;
-- how a recurring series is addressed for a mutation: the composite id names
-  an **occurrence**, and whether editing one occurrence implies an override
-  (and how one edits "the series from here") is a real question with no
-  answer until there is something to test against;
-- whether deletes are refused on a series with attendees, and similar
-  blast-radius questions.
+- **The tools.** `calendar_create_event`, `calendar_update_event`,
+  `calendar_delete_event` — events only in this phase, tasks to follow behind
+  the same three rules. Verified through `tools/list`: none of them declares a
+  `calendar` parameter, and all three are absent when
+  `CALDAV_EDITABLE_CALENDAR` is unset.
+- **A mutation's scope comes from the id.** A composite id names one
+  occurrence, a plain UID names the series, and there is no parameter to say
+  which — the id already says it, and a second way to say it would be a second
+  thing to get wrong. Editing an occurrence writes a `RECURRENCE-ID` override
+  *into the existing object*; deleting one writes an `EXDATE`; deleting the
+  series is a real `DELETE`.
+- **An id's occurrence half is the occurrence's current start**, so a *moved*
+  occurrence is addressed by its new time while its override is keyed on the
+  original slot. The object is expanded to recover that slot, because the id
+  alone cannot say which slot it came from.
+- **"This and future" is not supported.** The nearest supported thing is
+  truncating a series (`RRULE` rewritten to an `UNTIL`), which is a
+  well-defined change rather than an approximation of a series split. It is
+  deliberately not wired to a tool yet: it is a real capability with no caller,
+  and the design's rule about building only what is needed applies to it too.
+- **Deletes are not refused for a series with attendees** — YAGNI, as
+  elsewhere. The tool description says there is no undo; a blast-radius rule
+  is worth adding when a real calendar shows it matters.
+
+Two implementation findings that changed the code, recorded because both were
+invisible until measured: a UID must never become a path segment (a
+percent-encoded `..` escapes the collection), and an object carrying a moved
+occurrence **must not** be looked up by time window, because a `time-range`
+query does not see an override's new time and answers `200` with nothing.
 
 ## Errors are a sentence, detail is a log ⚠️
 
@@ -729,7 +746,7 @@ so CI stays hermetic.
   CalDAV is also configured. The acceptance criterion is not that it
   fetches, it is that its output is **indistinguishable from a read-only
   CalDAV calendar** — one `readonly` flag and nothing else.
-- **Phase 4 (contingent) — CalDAV writes.** Events then tasks, on the one
+- **Phase 4 — CalDAV writes.** Events then tasks, on the one
   calendar named by `CALDAV_EDITABLE_CALENDAR`, with `If-Match` optimistic
   concurrency from day one: "update the meeting I just showed you" is the
   real use case, and last-write-wins corrupts a shared calendar. No write
