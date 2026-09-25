@@ -8,6 +8,7 @@
         "php": "^8.5",
         "ext-ctype": "*",
         "ext-iconv": "*",
+        "directorytree/imapengine": "^1.25",
         "guzzlehttp/psr7": "^2.13",
         "mcp/sdk": "0.8.1",
         "psr/simple-cache": "^3.0",

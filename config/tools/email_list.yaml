@@ -1,0 +1,70 @@
+# Email listing tool — message envelopes (no bodies) from one folder.
+# Requires IMAP_HOST, IMAP_USERNAME and IMAP_PASSWORD, and the folder must
+# be named in IMAP_READ_FOLDERS. Both REST (POST /tools/list_emails) and MCP
+# (tools/call list_emails) invoke the same handler.
+#
+# The description carries only what a caller cannot infer from the schema —
+# in particular that reading a listing is metadata-only, and that a uid is
+# only meaningful within its own folder.
+name: list_emails
+description: >
+  List messages in one mail folder, newest first, as metadata only — no
+  message bodies are returned, and listing does not mark anything as read.
+  Each result carries a uid, which is the handle for that message in that
+  folder: uids are per-folder, so a uid from one folder means a different
+  message in another. Pass a uid to read_email to get the content. Use the
+  tagged and untagged filters to work with tags (labels this agent or a
+  rule applied), which are separate from the seen flag: seen/unread is the
+  human's state, visible in every mail client, so prefer tags for tracking
+  your own work. truncated true means there are more messages than the
+  limit returned; pass a larger offset for the next page. A changed
+  uidvalidity between calls means the mailbox was rebuilt and uids you
+  stored earlier may now refer to different messages. Errors reading
+  individual messages are reported in errors; the rest are still valid.
+handler: App\Tool\Email\ListEmailsTool::listEmails
+parameters:
+  folder:
+    type: string
+    description: 'Folder to list, e.g. "INBOX". Must be one this deployment may read — see list_email_folders.'
+    required: true
+  unread_only:
+    type: boolean
+    description: 'Only messages with no seen flag. Defaults to false (all messages).'
+    required: false
+  tagged:
+    type: string
+    description: 'Only messages carrying this tag (a label such as "AiRead"). Case-sensitive.'
+    required: false
+  untagged:
+    type: string
+    description: 'Only messages *not* carrying this tag. Useful to find work you have not labelled yet.'
+    required: false
+  sent_since:
+    type: string
+    description: 'Only messages sent on or after this date, YYYY-MM-DD. This is the message''s own Date header, not when it arrived in the mailbox.'
+    required: false
+    pattern: '^\d{4}-\d{2}-\d{2}$'
+  sent_before:
+    type: string
+    description: 'Only messages sent on or before this date, YYYY-MM-DD (the whole day is included).'
+    required: false
+    pattern: '^\d{4}-\d{2}-\d{2}$'
+  from:
+    type: string
+    description: 'Case-insensitive substring match on the sender. E.g. "alice".'
+    required: false
+  subject:
+    type: string
+    description: 'Case-insensitive substring match on the subject. E.g. "invoice".'
+    required: false
+  limit:
+    type: integer
+    description: 'Page size, 1-100. Defaults to 25.'
+    required: false
+    minimum: 1
+    maximum: 100
+  offset:
+    type: integer
+    description: 'Number of messages to skip, 0-based. Defaults to 0. Use with limit to page.'
+    required: false
+    minimum: 0
