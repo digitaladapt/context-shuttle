@@ -1,0 +1,29 @@
+# Email mark-read tool — change the human's unread state, deliberately.
+# Requires IMAP_HOST, IMAP_USERNAME and IMAP_PASSWORD, and the folder must
+# be named in IMAP_MARK_FOLDERS. Both REST (POST /tools/mark_email_read)
+# and MCP (tools/call mark_email_read) invoke the same handler.
+#
+# The description warns against casual use on purpose: this is the one tool
+# that writes a system flag, and the flag is shared with every other mail
+# client the human uses.
+name: mark_email_read
+description: >
+  Mark one message as read — that is, set the seen flag. Read this before
+  using it: seen/unread is the human's state, shown by every mail client,
+  and marking something read destroys the "not yet dealt with" signal they
+  rely on. Reading a message does not require this — read_email deliberately
+  leaves the flag alone, so use this only when a human has actually dealt
+  with the message, or has asked for it to be marked. For tracking your own
+  progress, tag_email is the tool you want. Returns the seen state as the
+  server has it after the change.
+handler: App\Tool\Email\MarkEmailTool::markEmailRead
+parameters:
+  folder:
+    type: string
+    description: 'Folder holding the message, e.g. "INBOX". Must be one this deployment may mark — see list_email_folders.'
+    required: true
+  uid:
+    type: integer
+    description: 'The message''s uid, as shown by list_emails. Uids are per-folder, and a move changes them.'
+    required: true
+    minimum: 1

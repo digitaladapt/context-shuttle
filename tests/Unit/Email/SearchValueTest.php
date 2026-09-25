@@ -8,6 +8,7 @@ use App\Email\Imap\MessageFilter;
 use App\Email\Imap\SearchValue;
 use DirectoryTree\ImapEngine\Connection\ImapQueryBuilder;
 use DirectoryTree\ImapEngine\Connection\RawQueryValue;
+use DirectoryTree\ImapEngine\Enums\ImapSearchKey;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -156,6 +157,30 @@ final class SearchValueTest extends TestCase
         self::assertStringContainsString('UNSEEN', $command);
         self::assertStringContainsString('KEYWORD "Work"', $command);
         self::assertStringContainsString('SUBJECT "invoice"', $command);
+    }
+
+    public function test_a_header_term_carries_both_of_its_arguments(): void
+    {
+        // RFC 3501 spells this `HEADER <field> <string>` — two arguments to
+        // one key. Two `where()` calls would emit
+        // `HEADER "field" HEADER "value"`, which Dovecot rejects with
+        // "Unexpected string as search key", so the pair is built by hand.
+        self::assertSame(
+            'HEADER "Message-ID" "<abc@example.com>"',
+            $this->buildQuery(new MessageFilter())->where(
+                ImapSearchKey::Header,
+                SearchValue::header('Message-ID', '<abc@example.com>'),
+            )->toImap(),
+        );
+    }
+
+    public function test_a_header_term_escapes_both_arguments(): void
+    {
+        // The message-id comes out of a message header and is attacker-chosen
+        // text, so it is quoted like any other search value.
+        $term = SearchValue::header('Message-ID', 'a"b');
+
+        self::assertSame('"Message-ID" "a\\"b"', $term->value);
     }
 
     public function test_an_empty_filter_is_recognised_as_unfiltered(): void
