@@ -8,6 +8,7 @@ use App\Calendar\CalDav\CalDavClient;
 use App\Calendar\CalendarReader;
 use App\Calendar\Domain\TimeZoneRule;
 use App\Calendar\Mapping\EventMapper;
+use App\Calendar\Provider\CalDavProvider;
 use App\Tool\Calendar\GetEventTool;
 use App\Tool\Calendar\ListEventsTool;
 use App\Tool\Calendar\ListTasksTool;
@@ -61,12 +62,12 @@ final class CalDavLiveTest extends TestCase
         $this->requireConfiguration();
 
         return $this->reader ??= new CalendarReader(
-            new CalDavClient(
+            [new CalDavProvider(new CalDavClient(
                 new NativeHttpClient(),
                 (string) getenv('CALDAV_LIVE_URL'),
                 getenv('CALDAV_LIVE_USERNAME') ?: '',
                 getenv('CALDAV_LIVE_PASSWORD') ?: '',
-            ),
+            ))],
             new EventMapper($this->timeZone()),
             $this->timeZone(),
         );

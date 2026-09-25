@@ -64,6 +64,17 @@ final readonly class CalDavClient
     }
 
     /**
+     * Whether a base URL has been configured.
+     *
+     * Checked at call time, never at boot: a calendar server being down (or
+     * unset) must not stop context-shuttle from starting.
+     */
+    public function isConfigured(): bool
+    {
+        return '' !== $this->baseUrl();
+    }
+
+    /**
      * Calendars visible to this account, discovered by `resourcetype`.
      *
      * Discovery is property-driven, never name-driven: on the reference

@@ -164,6 +164,8 @@ All configuration via environment variables — see `.env.example`. Key vars:
 | `IMAP_DELETE_FOLDER` | empty | Alias for `IMAP_TRASH_FOLDER`; wins when both are set |
 | `CALDAV_URL` / `CALDAV_USERNAME` / `CALDAV_PASSWORD` | empty | Enable the `calendar_list_events` and `calendar_get_event` tools |
 | `CALDAV_CALENDARS` | empty | Optional comma-separated calendars to expose; empty means all discovered |
+| `ICS_URL` | empty | An http(s) iCalendar feed to read as a second calendar source |
+| `ICS_NAME` | `ics` | Display name for the feed's synthetic calendar |
 | `TZ` | `UTC` | The timezone every calendar timestamp is rendered in, and date inputs are read in |
 
 Alert channels are enabled by presence: set `NTFY_TOPIC`, `DISCORD_WEBHOOK_URL`,
@@ -205,6 +207,15 @@ on a real account that also sees subscribed holidays and shared team
 calendars. Entries may be full hrefs (`/user/work/`) or bare names (`work`);
 an entry that matches nothing is logged with the calendars the server did
 offer, so a typo shows up as a warning rather than as an empty listing.
+
+An **ICS feed** (`ICS_URL`) can be configured alongside CalDAV, or instead
+of it. It appears as one read-only calendar; only `http(s)` is accepted, so
+a local file has to be served over HTTP rather than pointed at directly. A
+feed is fetched fresh on every call — nothing is cached.
+
+Both sources produce **identical output shapes**; the only difference a
+caller sees is that a feed's rows are read-only. That is deliberate: a
+result that revealed its own source would invite a caller to branch on it.
 
 ## Development
 

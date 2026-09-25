@@ -11,6 +11,8 @@ parameters:
     env(CALDAV_USERNAME): ''
     env(CALDAV_PASSWORD): ''
     env(CALDAV_CALENDARS): ''
+    env(ICS_URL): ''
+    env(ICS_NAME): 'ics'
     env(NTFY_URL): ''
     env(NTFY_TOPIC): ''
     env(NTFY_TOKEN): ''
@@ -50,6 +52,8 @@ parameters:
     caldav_username: '%env(string:default::CALDAV_USERNAME)%'
     caldav_password: '%env(string:default::CALDAV_PASSWORD)%'
     caldav_calendars: '%env(string:default::CALDAV_CALENDARS)%'
+    ics_url: '%env(string:default::ICS_URL)%'
+    ics_name: '%env(string:default::ICS_NAME)%'
 
     # TZ is the deployment's timezone: every timestamp the calendar tools
     # emit is rendered in it, and their date inputs are read in it. An
@@ -209,8 +213,22 @@ services:
             $allowedCalendars: '%caldav_calendars%'
             $logger: '@monolog.logger.mcp_invocation'
 
+    # ── Calendar sources ────────────────────────────────────────────────
+    # Both sources satisfy one contract, so the reader never learns which
+    # it is talking to. A source with no configuration is absent from the
+    # list entirely, rather than present and failing on every call.
+    App\Calendar\Provider\CalDavProvider:
+        tags: ['app.calendar_provider']
+
+    App\Calendar\Provider\IcsProvider:
+        tags: ['app.calendar_provider']
+        arguments:
+            $url: '%ics_url%'
+            $name: '%ics_name%'
+
     App\Calendar\CalendarReader:
         arguments:
+            $providers: !tagged_iterator app.calendar_provider
             $logger: '@monolog.logger.mcp_invocation'
 
     App\Tool\Calendar\ListEventsTool:

@@ -196,6 +196,19 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
   it keeps only the last of any repeated element and repeated `<response>`
   elements are how a multistatus carries its payload. Still no
   `calendar_list_tasks`, ICS, or writes.
+- Calendar **ICS feeds**, Phase 3: an `http(s)` iCalendar feed as a second
+  source alongside CalDAV, sharing one `CalendarProvider` contract so the
+  reader never learns which it is talking to. The acceptance criterion is
+  that its output is **indistinguishable from a read-only CalDAV
+  calendar**, so the test renders the same events through both providers
+  and compares row shapes field by field — the only permitted difference
+  is the `calendar` identity (`which` calendar), never `what kind`. A feed
+  is one synthetic read-only calendar, fetched whole on every call and
+  never cached, because a feed changes whenever it likes and offers no
+  `ETag` to lean on. `file://` is refused with a message saying why rather
+  than half-supported, per finding 13. Both sources may be configured at
+  once, or either alone; a source with no URL is removed at compile time
+  rather than registered and failing on every call.
 - Calendar **tasks** (`calendar_list_tasks`, `calendar_get_task`), Phase 2:
   VTODO through the same contract and mapper, open by default, no date
   range required, ordered by due date with undated tasks last. Two
