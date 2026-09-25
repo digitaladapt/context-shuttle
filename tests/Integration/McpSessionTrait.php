@@ -48,6 +48,8 @@ trait McpSessionTrait
 
     /**
      * POST a JSON-RPC payload inside an established session.
+     *
+     * @param array<string, mixed> $extraServer extra `$_SERVER` values, e.g. HTTP_ORIGIN
      */
     private function mcpRequest(KernelBrowser $client, string $sessionId, string $json, array $extraServer = []): void
     {

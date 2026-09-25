@@ -114,6 +114,8 @@ final class ToolRestController
     /**
      * Run one tools/call through the SDK's server, on a session that exists
      * only for this request.
+     *
+     * @param array<string, mixed> $arguments
      */
     private function callThroughPipeline(string $tool, array $arguments): ResponseInterface
     {

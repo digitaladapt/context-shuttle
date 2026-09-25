@@ -9,6 +9,7 @@ use Mcp\Capability\Registry\ReferenceHandlerInterface;
 use Mcp\Exception\InvalidArgumentException;
 use Mcp\Exception\RegistryException;
 use Mcp\Exception\ToolCallException;
+use Override;
 use Throwable;
 
 /**
@@ -50,15 +51,29 @@ final class ToolFailureTranslatingReferenceHandler implements ReferenceHandlerIn
     ) {
     }
 
+    /**
+     * @param array<string, mixed> $arguments
+     */
+    #[Override]
     public function handle(ElementReference $reference, array $arguments): mixed
     {
         try {
             return $this->inner->handle($reference, $arguments);
-        } catch (ToolCallException|RegistryException|InvalidArgumentException $e) {
+        } catch (RegistryException|InvalidArgumentException $e) {
             // Already the shape the SDK renders, and already carrying a
             // message meant for the client.
             throw $e;
         } catch (Throwable $e) {
+            // A tool that already threw `ToolCallException` needs no help — it
+            // is the shape `CallToolHandler` renders with `isError: true`. It
+            // is checked here rather than in the catch list above because the
+            // interface declares only `RegistryException` and
+            // `InvalidArgumentException`; a `ToolCallException` reaches us
+            // through the tool's own throw, which no signature advertises.
+            if ($e instanceof ToolCallException) {
+                throw $e;
+            }
+
             if (!isset($arguments['_session'])) {
                 // Not a tool call: let it surface as-is rather than
                 // mislabelling it a tool failure.
