@@ -4,7 +4,7 @@ Ordered by value; nothing here is scheduled until it is needed.
 
 ## Near term
 
-- **Alerts tool family** (`send_alert` now; `ask_user` /
+- **Alerts tool family** (`send_alert` shipped; `ask_user` /
   `ask_user_confirm` + `get_user_answer` next): provider-backed
   notifications (ntfy, Discord) with a 5-level priority model and
   bounded visible-link formatting; providers enabled by config

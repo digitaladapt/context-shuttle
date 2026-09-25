@@ -31,6 +31,16 @@ target "app" {
   target     = "app"
   context    = "."
   platforms  = ["linux/amd64", "linux/arm64"]
+
+  # Layer cache. The shared docker-publish.yaml sets cache-from/cache-to for
+  # its `action` backend but NOT for `bake`, so specifying it here is what keeps
+  # CI builds warm.
+  #
+  # Local builds outside CI have no GHA cache service, so override:
+  #   docker buildx bake --set 'app.cache-to=' --set 'app.cache-from='
+  cache-from = ["type=gha"]
+  cache-to   = ["type=gha,mode=max"]
+
   tags = concat(
     ["${DOCKERHUB_TARGET}:${TAG}"],
     VERSION != "" ? ["${DOCKERHUB_TARGET}:${VERSION}"] : [],
