@@ -71,10 +71,8 @@ services:
         resource: '../src/'
         exclude:
             - '../src/Kernel.php'
-            - '../src/Mcp/LoggingDispatcher.php'
-            - '../src/Mcp/McpStack.php'
-            - '../src/Mcp/YamlToolRegistrar.php'
-            - '../src/Mcp/CaptureTransport.php'
+            - '../src/Mcp/InvocationLogListener.php'
+            - '../src/Mcp/ToolFailureTranslatingReferenceHandler.php'
             - '../src/ToolRegistry/ToolDefinition.php'
             - '../src/ToolRegistry/ToolDefinitionException.php'
             - '../src/ToolRegistry/ToolLoader.php'
@@ -90,9 +88,13 @@ services:
     # ── Controllers ────────────────────────────────────────────────────
     App\Mcp\McpController:
         tags: ['controller.service_arguments']
+        arguments:
+            $httpFactory: '@app.psr17_http_factory'
 
     App\Rest\ToolRestController:
         tags: ['controller.service_arguments']
+        arguments:
+            $httpFactory: '@app.psr17_http_factory'
 
     App\Rest\OpenApiController:
         tags: ['controller.service_arguments']
@@ -100,15 +102,33 @@ services:
     App\Health\HealthController:
         tags: ['controller.service_arguments']
 
+    # PSR-17 request/stream factory for the Symfony↔PSR-7 bridge in the MCP
+    # and REST controllers. Shared: it is stateless.
+    app.psr17_http_factory:
+        class: GuzzleHttp\Psr7\HttpFactory
+        public: true
+
     # ── MCP wiring ─────────────────────────────────────────────────────
-    # The factory assembles the php-mcp Protocol/Dispatcher per request;
-    # LoggingDispatcher/YamlToolRegistrar/CaptureTransport are constructed
-    # by it directly (excluded from autoregistration above).
+    # The factory assembles the official SDK's Server per request. Handlers
+    # and the reference handler are constructed by it; the logger and event
+    # dispatcher are injected.
     App\Mcp\McpServerFactory:
         arguments:
             $container: '@service_container'
             $logger: '@logger'
+            $eventDispatcher: '@event_dispatcher'
+            # Pool name as Symfony registers it, NOT 'cache.<name>'.
+            $sessionPool: '@mcp_sessions'
+
+    # One structured log line per tool invocation. Hangs off the application
+    # dispatcher — the same one handed to the SDK as its PSR-14 dispatcher — so
+    # MCP and REST invocations both pass through it.
+    App\Mcp\InvocationLogListener:
+        arguments:
             $invocationLogger: '@monolog.logger.mcp_invocation'
+        tags:
+            - { name: kernel.event_listener, event: Mcp\Event\ResponseEvent, method: onResponse }
+            - { name: kernel.event_listener, event: Mcp\Event\ErrorEvent, method: onError }
 
     # Tool handlers are resolved by the MCP library through the PSR-11
     # container at call time, so they must stay public (removable
