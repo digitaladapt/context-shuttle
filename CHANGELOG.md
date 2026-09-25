@@ -105,6 +105,20 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
   it keeps only the last of any repeated element and repeated `<response>`
   elements are how a multistatus carries its payload. Still no
   `calendar_list_tasks`, ICS, or writes.
+- Calendar **write shape settled ahead of Phase 4**: writes target exactly
+  one calendar, named by `CALDAV_EDITABLE_CALENDAR`, and the variable being
+  empty means the write tools are **not registered at all** — rather than
+  being listed and refusing, a deployment that has not opted in is one
+  where a model cannot see a mutation verb. No write tool takes a
+  `calendar` argument, deliberately unlike the read tools: a caller that
+  could name a target could name the wrong one, and that mistake is not
+  recoverable the way a bad read is. This also **narrows `readonly`** to
+  mean "these tools can edit this row", so a calendar that is writable on
+  the server but is not the configured one reports `true` — otherwise the
+  field specifically designed to answer "can I edit this?" would say yes
+  about four calendars we will refuse. Rows only ever flip `false` to
+  `true`. Design: the *Writes* section of `docs/design/CALENDARS.md`.
+  Planning only; no code yet.
 - Calendar **ICS feeds**, Phase 3: an `http(s)` iCalendar feed as a second
   source alongside CalDAV, sharing one `CalendarProvider` contract so the
   reader never learns which it is talking to. The acceptance criterion is
