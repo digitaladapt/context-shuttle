@@ -82,21 +82,22 @@ final class YamlToolRegistrar
      * ReferenceHandler treats a *string* handler as a global function name, and
      * only the array form goes through the container.
      *
-     * @return array{class-string, string}
+     * Typed as `array{string, string}` rather than `array{class-string, string}`
+     * because the SDK accepts `callable|array|string`, so either shape is
+     * accepted — and a class-string annotation here would only have to be
+     * restated for the fixer.
+     *
+     * @return array{string, string}
      */
     private function handlerFor(ToolDefinition $definition): array
     {
         if (str_contains($definition->handler, '::')) {
             [$class, $method] = explode('::', $definition->handler, 2);
 
-            /** @var class-string $class */
             return [$class, $method];
         }
 
-        /** @var class-string $class */
-        $class = $definition->handler;
-
-        return [$class, '__invoke'];
+        return [$definition->handler, '__invoke'];
     }
 
     /**

@@ -10,6 +10,7 @@ use GuzzleHttp\Psr7\HttpFactory;
 use Mcp\Server\Session\SessionInterface;
 use Mcp\Server\Transport\StreamableHttpTransport;
 use Psr\Http\Message\ResponseInterface;
+use stdClass;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -150,7 +151,7 @@ final class ToolRestController
                 'name' => $tool,
                 // An empty argument bag must encode as `{}`, not `[]`, or the
                 // JSON-RPC params fail schema validation on the way in.
-                'arguments' => [] === $arguments ? new \stdClass() : $arguments,
+                'arguments' => [] === $arguments ? new stdClass() : $arguments,
             ],
         ], \JSON_THROW_ON_ERROR);
 

@@ -9,6 +9,7 @@ use Mcp\Capability\Registry\ReferenceHandlerInterface;
 use Mcp\Exception\InvalidArgumentException;
 use Mcp\Exception\RegistryException;
 use Mcp\Exception\ToolCallException;
+use Throwable;
 
 /**
  * Keeps tool-authored error messages in front of the caller.
@@ -57,7 +58,7 @@ final class ToolFailureTranslatingReferenceHandler implements ReferenceHandlerIn
             // Already the shape the SDK renders, and already carrying a
             // message meant for the client.
             throw $e;
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             if (!isset($arguments['_session'])) {
                 // Not a tool call: let it surface as-is rather than
                 // mislabelling it a tool failure.
