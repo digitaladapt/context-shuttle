@@ -1,0 +1,55 @@
+# Calendar events tool — occurrences from the configured calendar source.
+# Requires CALDAV_URL, CALDAV_USERNAME and CALDAV_PASSWORD (an app password
+# is usually required). Both REST (POST /tools/calendar_list_events) and MCP
+# (tools/call calendar_list_events) invoke the same handler.
+#
+# The description is what a model reads first, so it carries only what a
+# caller cannot infer — and it deliberately names no data source, so nothing
+# here invites a caller to branch on where the events came from.
+name: calendar_list_events
+description: >
+  List calendar events occurring within an inclusive date range, in the
+  deployment's timezone. Recurring events are returned as one entry per
+  occurrence, so a single series can produce several results: use each
+  entry's id (not uid) as the handle for one occurrence, and pass that id
+  back to fetch it again. All timestamps are already expressed in the
+  deployment's timezone — no offset or daylight-saving reasoning is needed,
+  and the timezone name is repeated in the response. Note that id is a UTC
+  instant (or a plain date, for an all-day event) and is deliberately not
+  the same string as start; compare them as times, or not at all. All-day
+  events have all_day true and carry dates with no time component, and
+  their end date is exclusive. Each entry reports whether it is read-only,
+  so a caller can tell before attempting any change. Pass next_cursor back
+  verbatim to page through longer listings; has_more false means the
+  listing is complete. A non-empty errors string means some events were
+  malformed and were skipped — the rest are still valid.
+handler: App\Tool\Calendar\ListEventsTool::listEvents
+parameters:
+  from:
+    type: string
+    description: 'Start date of the range, YYYY-MM-DD (inclusive), in the deployment''s timezone. E.g. 2026-10-01.'
+    required: true
+    pattern: '^\d{4}-\d{2}-\d{2}$'
+  to:
+    type: string
+    description: 'End date of the range, YYYY-MM-DD (inclusive, must not be before from). E.g. 2026-10-31.'
+    required: true
+    pattern: '^\d{4}-\d{2}-\d{2}$'
+  calendar:
+    type: string
+    description: 'Restrict to a single calendar, by its href or display name. Omit to search every calendar.'
+    required: false
+  search:
+    type: string
+    description: 'Case-insensitive text match against event summary, description and location. Omit to return everything in the range.'
+    required: false
+  limit:
+    type: integer
+    description: 'Page size, 1-200. Defaults to 50.'
+    required: false
+    minimum: 1
+    maximum: 200
+  cursor:
+    type: string
+    description: 'Opaque paging token from a previous call''s next_cursor. Omit for the first page; pass it back verbatim otherwise.'
+    required: false

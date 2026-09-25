@@ -46,6 +46,23 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
   Phase 3 — `http(s)` only, since `symfony/http-client` refuses `file://`,
   and shaped so it is indistinguishable from a read-only CalDAV calendar.
   Planning only; no code yet.
+- Calendar read path, first slice: `calendar_list_events` end to end —
+  discovery, `calendar-query`, client-side recurrence expansion, the
+  timezone rule, composite occurrence ids, opaque cursor paging, and the
+  tool/YAML/env wiring. Verified against a live Radicale 3.8.0 instance
+  (21 occurrences across two calendars, paging walked to exhaustion with
+  no duplicates or gaps). `sabre/vobject` resolved to 5.0.0 where the
+  design's findings were established on 4.6.1, so every finding was
+  re-verified against 5.0.0 before being relied on. Three things the live
+  server taught us that the design had not anticipated: discovery needs the
+  standard `current-user-principal` → `calendar-home-set` bootstrap (the
+  configured URL is a principal, so a `Depth: 1` listing of it finds no
+  calendars at all); a calendar is a *child of* `resourcetype`, not a
+  property, so asking the obvious question silently returns none; and
+  `sabre/xml`'s `keyValue` deserializer cannot parse a multistatus, since
+  it keeps only the last of any repeated element and repeated `<response>`
+  elements are how a multistatus carries its payload. Still no
+  `calendar_get_event`, `calendar_list_tasks`, ICS, or writes.
 
 
 ### Changed
