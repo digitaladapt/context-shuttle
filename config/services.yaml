@@ -203,12 +203,20 @@ services:
             $configuredBaseUrl: '%caldav_url%'
             $username: '%caldav_username%'
             $password: '%caldav_password%'
+            # Empty means every discovered calendar. A non-empty value is
+            # the exposure boundary, so an entry that matches nothing is
+            # logged rather than silently serving a narrower listing.
+            $allowedCalendars: '%caldav_calendars%'
+            $logger: '@monolog.logger.mcp_invocation'
 
     App\Calendar\CalendarReader:
         arguments:
             $logger: '@monolog.logger.mcp_invocation'
 
     App\Tool\Calendar\ListEventsTool:
+        public: true
+
+    App\Tool\Calendar\GetEventTool:
         public: true
 
     # ── Alerts ─────────────────────────────────────────────────────────

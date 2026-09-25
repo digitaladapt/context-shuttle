@@ -1,0 +1,28 @@
+# Calendar event lookup tool — one occurrence, or a whole series, from the
+# configured calendar source.
+#
+# Declared separately from calendar_list_events because the loader treats
+# one YAML file as exactly one tool. The two descriptions are written to
+# agree on how an id behaves, since a caller moves between them.
+# The same file declares the sibling tool, so a caller reading tools/list
+# sees the pair together and the two cannot drift in how they describe ids.
+name: calendar_get_event
+description: >
+  Fetch a single calendar event by its id. Pass back an id from
+  calendar_list_events to get that one occurrence, or pass a series UID
+  (the uid field) to get a whole recurring series expanded into its
+  occurrences. All timestamps are already expressed in the deployment's
+  timezone, and the timezone name is repeated in the response. Note that
+  id is a UTC instant (or a plain date, for an all-day event) and is
+  deliberately not the same string as start; compare them as times, or not
+  at all. All-day events have all_day true and carry dates with no time
+  component, and their end date is exclusive. Each entry reports whether it
+  is read-only. An unknown id is an error naming it, not an empty result. A
+  non-empty errors string means some events were malformed and were skipped
+  — anything returned is still valid.
+handler: App\Tool\Calendar\GetEventTool::getEvent
+parameters:
+  id:
+    type: string
+    description: 'An id from calendar_list_events (a specific occurrence), or a plain series uid to fetch every occurrence of a recurring event.'
+    required: true
