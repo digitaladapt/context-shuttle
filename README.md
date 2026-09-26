@@ -7,7 +7,7 @@ endpoint (`POST /tools/{name}`), with a generated OpenAPI 3.1 spec at
 `/openapi.json`. Both entry points share one execution pipeline and one
 structured invocation log.
 
-Built with Symfony 8.1 / PHP 8.5 on `php-mcp/server`.
+Built with Symfony 8.1 / PHP 8.5 on the official `mcp/sdk` (pinned).
 
 ---
 
@@ -285,11 +285,11 @@ composer stan   # phpstan
 composer test   # phpunit
 ```
 
-> **Dependency note:** `php-mcp/server` is currently pinned to a commit on the
-> `feat/symfony-8-support` branch of the project fork at
-> `code.digitaladapt.com/public/php-mcp-server` (12 commits ahead of the 3.3.0
-> release; the release does not yet allow symfony/finder 8.x). When upstream
-> ships a tag allowing Symfony 8, replace the pinned constraint with that tag.
+> **Dependency note:** `mcp/sdk` is pinned to an exact version (`0.8.1`, no
+> `^`/`~`) because pre-1.0 it treats every digit as potentially
+> BC-breakable. To check for updates (monthly is the cadence) and to know
+> what to re-verify before bumping, see
+> `docs/design/MCP_SDK_VERSION_CHECK.md`.
 
 ## License
 
