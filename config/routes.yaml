@@ -29,3 +29,6 @@ ready:
     path: /ready
     controller: App\Health\HealthController::ready
     methods: [GET]
+
+controllers:
+    resource: routing.controllers

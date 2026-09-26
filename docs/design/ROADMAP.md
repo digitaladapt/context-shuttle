@@ -34,8 +34,9 @@ on, including the ability to notice and undo it.
 
 ## Near term
 
-- **Alerts tool family** (`send_alert` shipped; `ask_user` /
-  `ask_user_confirm` + `get_user_answer` next): provider-backed
+- **Alerts tool family** (`send_alert` shipped; Phase 1 plumbing — store,
+  `/ask` form, `/inputs/{id}` — shipped; `ask_user` / `ask_user_confirm` +
+  `get_user_answer` next): provider-backed
   notifications (ntfy, Discord) with a 5-level priority model and
   bounded visible-link formatting; providers enabled by config
   presence (either or both), self-hosted ntfy supported; interactive
@@ -150,8 +151,9 @@ on, including the ability to notice and undo it.
   worker-shaped idea as `context-loom`'s `ImapIdleListener`. Needs a
   long-lived connection, which the stateless request model does not have.
   Phase 4 of `docs/design/EMAIL.md`.
-- **Upstream the Symfony 8 constraint** of the php-mcp fork so the pin
-  can move to a tagged release.
+- **Relax the `mcp/sdk` pin** to `^1.0` once the SDK ships 1.0 — that is
+  the moment its BC promise starts applying. Until then the exact pin and
+  the monthly check are deliberate (see `MCP_SDK_VERSION_CHECK.md`).
 - **Rector** adoption — only after coverage reaches 100% (§2.3 ordering).
 - **Multi-file tools** (one YAML defining several tools) if a use case
   demands it; current one-file-one-tool keeps diffs reviewable.

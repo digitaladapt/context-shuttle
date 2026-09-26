@@ -1,0 +1,39 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}context-shuttle — {{ state == 'form' ? 'Question' : 'Answer' }}{% endblock %}
+
+{% block body %}
+    {% if state == 'form' %}
+        <h1>{{ pending.question }}</h1>
+
+        {% if error %}
+            <p role="alert"><strong>{{ error }}</strong></p>
+        {% endif %}
+
+        <form method="post" action="{{ path('alerts_ask_submit', {id: pending.id}) }}">
+            {% if pending.type.value == 'confirm' %}
+                <div class="actions">
+                    <button class="primary" type="submit" name="answer" value="yes"><span>{{ pending.confirmLabel }}</span></button>
+                    <button type="submit" name="answer" value="no">{{ pending.dismissLabel }}</button>
+                </div>
+            {% else %}
+                <textarea name="answer" placeholder="{{ pending.placeholder ?? '' }}" autofocus required>{{ submitted }}</textarea>
+                <div class="actions">
+                    <button class="primary" type="submit"><span>Submit answer</span></button>
+                </div>
+            {% endif %}
+        </form>
+
+        <p class="muted">This link accepts one answer and expires {{ pending.expiresAt|date('Y-m-d H:i') }} UTC.</p>
+    {% elseif state == 'answered' %}
+        <h1>Answer received</h1>
+        <p>Thanks — the assistant has everything it needs. You can close this tab.</p>
+        <p class="muted">Question: {{ pending.question }}</p>
+    {% elseif state == 'expired' %}
+        <h1>This request has expired</h1>
+        <p>No answer was recorded in time. If it is still needed, ask the assistant to send the question again.</p>
+    {% else %}
+        <h1>Request not found</h1>
+        <p>This link is not valid. It may have been mistyped, or the request may already have been cleared.</p>
+    {% endif %}
+{% endblock %}
