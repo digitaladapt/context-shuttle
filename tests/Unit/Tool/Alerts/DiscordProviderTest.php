@@ -103,6 +103,54 @@ final class DiscordProviderTest extends TestCase
         self::assertSame(['users' => ['424242']], $payload['allowed_mentions']);
     }
 
+    public function test_level_5_accepts_a_pasteable_mention_form(): void
+    {
+        // "Copy User ID" and rendered message source both yield the
+        // `<@id>` / `<@!id>` form; normalise it rather than rejecting it.
+        $provider = $this->provider(mentionUserId: '<@!424242>');
+
+        $provider->send(new OutboundAlert('Urgent', null, new Priority(5)));
+
+        $payload = json_decode($this->calls[0]['options']['body'], true);
+
+        self::assertSame('<@424242>', $payload['content']);
+        self::assertSame(['users' => ['424242']], $payload['allowed_mentions']);
+    }
+
+    public function test_level_5_rejects_a_non_numeric_mention_id(): void
+    {
+        // A username is the mistake that reaches production: Discord's
+        // `allowed_mentions.users` takes snowflakes only, and a username
+        // there makes Discord answer HTTP 400 Invalid Form Body — an
+        // opaque error that reads as a malformed mention. Refuse it here,
+        // naming the env var, before any request is attempted.
+        $provider = $this->provider(mentionUserId: 'lyra');
+
+        try {
+            $provider->send(new OutboundAlert('Urgent', null, new Priority(5)));
+            self::fail('Expected a RuntimeException.');
+        } catch (RuntimeException $e) {
+            self::assertStringContainsString('DISCORD_MENTION_USER_ID', $e->getMessage());
+            self::assertStringContainsString('numeric', $e->getMessage());
+        }
+
+        // Nothing was sent: the payload never reached the HTTP client.
+        self::assertCount(0, $this->calls);
+    }
+
+    public function test_non_numeric_mention_id_is_only_rejected_at_level_5(): void
+    {
+        // Below level 5 the mention path is never taken, so a bad value
+        // there must not fail an otherwise perfectly deliverable alert.
+        $provider = $this->provider(mentionUserId: 'lyra');
+
+        $provider->send(new OutboundAlert('Routine', null, new Priority(4)));
+
+        $payload = json_decode($this->calls[0]['options']['body'], true);
+        self::assertArrayNotHasKey('content', $payload);
+        self::assertSame(['parse' => []], $payload['allowed_mentions']);
+    }
+
     public function test_level_5_without_configured_user_does_not_mention(): void
     {
         $provider = $this->provider(mentionUserId: '');
