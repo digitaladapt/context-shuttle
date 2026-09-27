@@ -35,6 +35,12 @@ use DirectoryTree\ImapEngine\Support\Str;
  * Dovecot: `find('inbox')` resolves, `find('archive')` does not. Matching
  * `Archive` case-insensitively would silently widen an operator's allowlist.
  *
+ * That case-insensitivity follows the mailbox through a hierarchy: on a
+ * `.`-separated server the first segment is the `INBOX` reference
+ * (`Inbox.Bank` is the subfolder `Bank` of `INBOX`), so that head segment is
+ * matched case-insensitively too, while every later segment stays
+ * case-sensitive. See {@see self::normalize()}.
+ *
  * ## Configuring a folder that does not exist
  *
  * An entry naming no real folder is reported as a configuration error at
@@ -296,6 +302,16 @@ final readonly class FolderGate
             $folder = Str::fromImapUtf7($folder);
         }
 
-        return 'inbox' === strtolower($folder) ? 'inbox' : $folder;
+        // The head is everything up to the first hierarchy separator. Both
+        // common delimiters are recognised, because the configured name and
+        // the reported name can each use either (`/` for a plain Dovecot
+        // namespace, `.` for one configured as subfolders of Inbox).
+        $head = substr($folder, 0, strcspn($folder, './'));
+
+        if ('inbox' === strtolower($head)) {
+            return 'inbox'.substr($folder, \strlen($head));
+        }
+
+        return $folder;
     }
 }

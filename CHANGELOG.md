@@ -6,6 +6,36 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Email: `list_email_folders` reported an empty list, and named populated
+  folders as non-existent, on a `.`-separated server.** The folder gate
+  compared folder names byte-for-byte apart from `INBOX` itself, but on such a
+  server a mailbox created (and configured) as `Inbox.Bank` is reported by
+  `LIST` under the server's canonical **`INBOX.Bank`** — `Inbox.` names a
+  subfolder of the case-insensitive `INBOX`. Exact matching therefore failed: no
+  configured folder matched, so every folder was dropped from the listing
+  (`"folders": [], "count": 0`), and `unmatched()` reported the same populated
+  folders under its "do not exist" warning. Reads still worked when a caller
+  happened to pass the configured spelling, which is why the two symptoms
+  looked contradictory. The gate now lower-cases the **`INBOX` head segment**
+  of a hierarchical name (both `/` and `.` separators), and every later segment
+  stays case-sensitive. Verified against Dovecot 2.4.1 with `separator = .`
+  (finding 29).
+
+- **Email: "folder does not exist" and "folder not permitted" are now distinct
+  errors.** A missing folder reached the caller as
+  `FolderNotAllowedException` ("set `IMAP_READ_FOLDERS` to allow it"), sending
+  an operator to the env file for a name they had simply misspelled; the name
+  was echoed back from the request and never validated. A missing folder is now
+  a typed `FolderNotFound` naming the folder and pointing at
+  `list_email_folders`, leaving the permission refusal to mean only permission.
+  The `list_email_folders` warning is reworded to "matched no folder" and names
+  the likely causes, rather than asserting a populated folder does not exist.
+  `FakeImapServer`'s `LIST` matching was tightened to a real server's rule
+  (case-sensitive except the `INBOX` head) — its earlier leniency on the whole
+  path is what let the casing bug pass the suite.
+
 ### Added
 
 - **Interactive-request plumbing (alerts Phase 1)**: the provider-free

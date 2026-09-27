@@ -200,4 +200,65 @@ final class FolderGateTest extends TestCase
 
         self::assertSame(['Nowhere', 'Elsewhere'], $gate->unmatched(['INBOX']));
     }
+
+    // ── INBOX casing across a hierarchy ─────────────────────────────────
+
+    public function test_an_inbox_subfolder_matches_across_the_inbox_casing(): void
+    {
+        // The bug this pins: a `.`-separated server reports a mailbox
+        // created (and configured) as `Inbox.Bank` under the canonical
+        // `INBOX.Bank`, because `Inbox.` names a subfolder of the
+        // case-insensitive `INBOX`. Exact matching against the configured
+        // spelling then refused every folder, and reported the populated
+        // ones as "does not exist".
+        foreach (['Inbox.Bank', 'INBOX.Bank', 'inbox.Bank'] as $configured) {
+            $gate = new FolderGate(readFolders: $configured);
+
+            self::assertTrue(
+                $gate->allows(FolderGate::OPERATION_READ, 'INBOX.Bank'),
+                \sprintf('%s must match the server spelling INBOX.Bank', $configured),
+            );
+        }
+    }
+
+    public function test_an_inbox_subfolder_matches_across_the_slash_separator_too(): void
+    {
+        // The same rule on a `/`-separated server: only the `INBOX` head is
+        // case-insensitive, and the parser must not care which separator the
+        // name happens to use.
+        $gate = new FolderGate(readFolders: 'Inbox/Reports');
+
+        self::assertTrue($gate->allows(FolderGate::OPERATION_READ, 'INBOX/Reports'));
+    }
+
+    public function test_only_the_inbox_head_is_case_insensitive_not_the_rest(): void
+    {
+        // The head exemption must not leak down the path: `Bank` is a
+        // subfolder and stays case-sensitive, exactly as before.
+        $gate = new FolderGate(readFolders: 'Inbox.Bank');
+
+        self::assertTrue($gate->allows(FolderGate::OPERATION_READ, 'INBOX.Bank'));
+        self::assertFalse($gate->allows(FolderGate::OPERATION_READ, 'INBOX.bank'));
+        self::assertFalse($gate->allows(FolderGate::OPERATION_READ, 'INBOX.BANK'));
+    }
+
+    public function test_a_non_inbox_hierarchy_stays_case_sensitive(): void
+    {
+        // `Archive` is not `INBOX`, so nothing about it is case-insensitive —
+        // matching it either way would silently widen an allowlist.
+        $gate = new FolderGate(readFolders: 'Archive.2026');
+
+        self::assertTrue($gate->allows(FolderGate::OPERATION_READ, 'Archive.2026'));
+        self::assertFalse($gate->allows(FolderGate::OPERATION_READ, 'archive.2026'));
+        self::assertFalse($gate->allows(FolderGate::OPERATION_READ, 'ARCHIVE.2026'));
+    }
+
+    public function test_an_inbox_subfolder_is_not_reported_as_unmatched(): void
+    {
+        // The companion symptom: the listing's warning claimed populated
+        // folders "do not exist" because the match failed.
+        $gate = new FolderGate(readFolders: 'Inbox.Bank,Inbox.DevGnome');
+
+        self::assertSame([], $gate->unmatched(['INBOX', 'INBOX.Bank', 'INBOX.DevGnome']));
+    }
 }

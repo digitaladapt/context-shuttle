@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Email;
 
+use App\Email\Imap\FolderNotFound;
 use App\Email\Imap\ImapClient;
 use App\Email\Imap\ImapConnectionFactory;
 use App\Email\Imap\MessageFilter;
@@ -345,6 +346,20 @@ final class ImapClientTest extends TestCase
         $server = new FakeImapServer();
 
         $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/NoSuchFolder/');
+
+        $this->client($server)->folderStatus('NoSuchFolder');
+    }
+
+    public function test_a_missing_folder_is_a_typed_not_found_not_a_permission_error(): void
+    {
+        // "That folder does not exist" and "you may not touch that folder"
+        // look identical when both are reported as a permission problem, and
+        // they send an operator to two different fixes (rename vs. configure).
+        // The not-found case is its own type so the tool layer can say so.
+        $server = new FakeImapServer();
+
+        $this->expectException(FolderNotFound::class);
         $this->expectExceptionMessageMatches('/NoSuchFolder/');
 
         $this->client($server)->folderStatus('NoSuchFolder');

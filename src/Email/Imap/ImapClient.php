@@ -862,9 +862,12 @@ final readonly class ImapClient
 
         if (null === $folder) {
             // The gate has already let this folder through, so a miss here
-            // means the folder vanished between discovery and use. Say so in
-            // terms the caller can act on: the name they typed.
-            throw new RuntimeException(\sprintf('No such folder on this mail server: "%s".', $path));
+            // means the folder does not exist (or vanished between discovery
+            // and use). Thrown as a *typed* failure so the tool layer can
+            // phrase "that folder does not exist" differently from "you are
+            // not allowed to touch that folder" — the two are easy to
+            // confuse and lead an operator to different fixes.
+            throw new FolderNotFound($path);
         }
 
         return $folder;

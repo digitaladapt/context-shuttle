@@ -65,9 +65,18 @@ final readonly class ListFoldersTool
         // A configured folder that matched nothing is a deployment mistake
         // worth surfacing: a typo in IMAP_TRASH_FOLDER would otherwise look
         // exactly like a mail server with no trash.
+        //
+        // The wording says matched, not absent, on purpose. A name that is
+        // merely spelled differently (the wrong INBOX casing, a separator
+        // that is not the one in use) lands here too, and telling an operator
+        // a populated folder "does not exist" sends them looking for a
+        // missing mailbox instead of a typo. The likely causes are named so
+        // the fix is obvious.
         if ([] !== $result['unmatched']) {
             $payload['warnings'] = \sprintf(
-                'These configured folders do not exist on the mail server: %s.',
+                'These configured folders matched no folder on the mail server: %s. '
+                .'Check the spelling and case (only the INBOX part is case-insensitive) and the hierarchy '
+                .'separator — list_email_folders shows the exact names the server uses.',
                 implode(', ', $result['unmatched']),
             );
         }
