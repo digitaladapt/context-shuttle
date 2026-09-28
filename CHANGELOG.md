@@ -108,6 +108,23 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
   test tagged the *wrong message* and reported success. The fixture now only
   answers for ids it was told exist. 49 new tests.
 
+### Fixed
+
+- **`send_alert`: a Discord mention configured as a username no longer
+  produces an opaque `HTTP 400`.** `DISCORD_MENTION_USER_ID` was interpolated
+  verbatim into the level-5 mention (`<@$id>`, and the same value into
+  `allowed_mentions.users`). Discord's `allowed_mentions.users` accepts
+  snowflakes only, so a username there made Discord reject the *whole* request
+  with `Invalid Form Body` — an error that reads as a malformed mention but is
+  a malformed config value, and only ever fires at priority 5 (the sole level
+  that mentions). The provider now validates the value and refuses a
+  non-numeric one with a message naming the env var and how to get the id,
+  before any request is made; the pasteable `<@id>` / `<@!id>` form is
+  normalised rather than rejected. Documented in README and `.env.example`
+  ("the numeric user ID, not the username"); covered by unit tests for the
+  reject, the normalise, and a bad value below level 5 (which must still
+  deliver).
+
 ### Changed
 
 - **MCP server library: the `php-mcp/server` fork → the official `mcp/sdk`**

@@ -31,6 +31,11 @@ use Throwable;
  *    an LLM cannot mass-ping a server no matter what it puts in the
  *    body. (Note: `parse` and `users` are mutually exclusive on
  *    Discord's side — we send one or the other, never both.)
+ *  - The mention target must be a numeric user ID (snowflake):
+ *    `allowed_mentions.users` does not accept usernames, and a
+ *    username there makes Discord reject the whole request with
+ *    `HTTP 400 Invalid Form Body`. A non-numeric value is refused here
+ *    with a message naming the env var instead (see mentionUserId()).
  */
 #[AutoconfigureTag('app.alert_provider')]
 final class DiscordProvider implements AlertProvider
@@ -147,17 +152,61 @@ final class DiscordProvider implements AlertProvider
             'allowed_mentions' => ['parse' => []],
         ];
 
-        $mentionUserId = trim($this->mentionUserId);
-        if ($alert->priority->mentions() && '' !== $mentionUserId) {
-            // The mention must appear in `content` to actually ping;
-            // `allowed_mentions.users` then pins the only user who can
-            // be pinged (mutually exclusive with `parse`, so no
-            // @everyone/@here/role mention can ride along).
-            $payload['content'] = '<@'.$mentionUserId.'>';
-            $payload['allowed_mentions'] = ['users' => [$mentionUserId]];
+        if ($alert->priority->mentions()) {
+            $mentionUserId = $this->mentionUserId();
+            if (null !== $mentionUserId) {
+                // The mention must appear in `content` to actually ping;
+                // `allowed_mentions.users` then pins the only user who can
+                // be pinged (mutually exclusive with `parse`, so no
+                // @everyone/@here/role mention can ride along).
+                $payload['content'] = '<@'.$mentionUserId.'>';
+                $payload['allowed_mentions'] = ['users' => [$mentionUserId]];
+            }
         }
 
         return $payload;
+    }
+
+    /**
+     * The configured mention target as a bare numeric snowflake, or null
+     * when none is configured.
+     *
+     * Discord's `allowed_mentions.users` takes snowflakes, not usernames:
+     * a username there makes Discord reject the whole request with
+     * `HTTP 400 Invalid Form Body` (the error points at `users`), which
+     * looks like a malformed mention but is a malformed *config value*.
+     * Validating here turns that opaque 400 into a message naming the env
+     * var, at the moment the alert is sent rather than when a webhook
+     * happens to answer. The `<@id>` / `<@!id>` mention form is accepted
+     * too, since that is what "Copy User ID" and message source yield.
+     *
+     * (Discord never indicates *which* value was wrong and the id is not a
+     * credential, so echoing it back is safe and makes the message
+     * actionable.)
+     *
+     * @throws RuntimeException when a non-numeric value is configured
+     */
+    private function mentionUserId(): ?string
+    {
+        $configured = trim($this->mentionUserId);
+        if ('' === $configured) {
+            return null;
+        }
+
+        // Accept the pasteable mention forms as well as a bare id.
+        if (1 === preg_match('/^<@!?(\d+)>$/', $configured, $matches)) {
+            $configured = $matches[1];
+        }
+
+        // Snowflakes are large integers, but their exact width is not part
+        // of Discord's contract; a permissive digit range catches the real
+        // mistake (a username or other non-numeric text) without pinning a
+        // width that could reject a valid future id.
+        if (1 !== preg_match('/^\d{5,20}$/', $configured)) {
+            throw new RuntimeException(\sprintf('DISCORD_MENTION_USER_ID must be a numeric Discord user ID (a snowflake), not a username — got "%s". Enable Developer Mode, right-click your avatar, and Copy User ID.', $configured));
+        }
+
+        return $configured;
     }
 
     private function errorDetail(ResponseInterface $response): string

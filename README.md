@@ -165,7 +165,7 @@ All configuration via environment variables — see `.env.example`. Key vars:
 | `NTFY_TOPIC` | empty | Enable the ntfy channel of `send_alert` |
 | `NTFY_URL` / `NTFY_TOKEN` | `https://ntfy.sh` / empty | Self-hosted ntfy server and access token |
 | `DISCORD_WEBHOOK_URL` | empty | Enable the Discord channel of `send_alert` |
-| `DISCORD_MENTION_USER_ID` | empty | User mentioned by priority-5 alerts only |
+| `DISCORD_MENTION_USER_ID` | empty | **Numeric** Discord user ID (snowflake, *not* a username) mentioned by priority-5 alerts only |
 | `IMAP_HOST` / `IMAP_USERNAME` / `IMAP_PASSWORD` | empty | Enable the email tools. Use an app password for Gmail |
 | `IMAP_PORT` / `IMAP_ENCRYPTION` | derived / `ssl` | Port defaults to 993 for `ssl`, 143 otherwise |
 | `IMAP_READ_FOLDERS` | empty | Folders `list_emails` and `read_email` may name |
