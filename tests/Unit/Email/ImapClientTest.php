@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Email;
 
+use App\Email\Imap\FolderNotFound;
 use App\Email\Imap\ImapClient;
 use App\Email\Imap\ImapConnectionFactory;
 use App\Email\Imap\MessageFilter;
@@ -345,6 +346,76 @@ final class ImapClientTest extends TestCase
         $server = new FakeImapServer();
 
         $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/NoSuchFolder/');
+
+        $this->client($server)->folderStatus('NoSuchFolder');
+    }
+
+    public function test_a_missing_folder_is_a_typed_not_found_not_a_permission_error(): void
+    {
+        // "That folder does not exist" and "you may not touch that folder"
+        // look identical when both are reported as a permission problem, and
+        // they send an operator to two different fixes (rename vs. configure).
+        // The not-found case is its own type so the tool layer can say so.
+        $server = new FakeImapServer();
+
+        $this->expectException(FolderNotFound::class);
+        $this->expectExceptionMessageMatches('/NoSuchFolder/');
+
+        $this->client($server)->folderStatus('NoSuchFolder');
+    }
+
+    public function test_a_folder_is_resolved_across_separators(): void
+    {
+        // The server has `Projects/Widget`; a caller names it with a dot. A
+        // real server would answer the exact `LIST` with nothing, so this
+        // only passes through the identity fallback — the same rule the gate
+        // uses, which is what keeps "may I?" and "find it" in agreement.
+        $server = new FakeImapServer();
+        $server->folder('Projects/Widget');
+        $server->status('Projects/Widget', 3, 1, 9);
+
+        $status = $this->client($server)->folderStatus('Projects.Widget');
+
+        self::assertSame(3, $status['messages']);
+        self::assertSame(9, $status['uidvalidity']);
+    }
+
+    public function test_a_folder_is_resolved_across_case(): void
+    {
+        $server = new FakeImapServer();
+        $server->folder('Archive');
+        $server->status('Archive', 2, 0, 1);
+
+        $status = $this->client($server)->folderStatus('archive');
+
+        self::assertSame(2, $status['messages']);
+    }
+
+    public function test_a_resolved_folder_keeps_the_servers_own_spelling(): void
+    {
+        // Resolution changes which mailbox is used, never the name that is
+        // reported. The server calls it `INBOX/Bank`; that is what comes back,
+        // not the caller's `inbox.bank`.
+        $server = new FakeImapServer();
+        $server->folder('INBOX/Bank');
+        $server->status('INBOX/Bank', 5, 1, 1);
+
+        $folders = $this->client($server)->listFolders();
+        $paths = array_column($folders, 'path');
+
+        self::assertContains('INBOX/Bank', $paths);
+        self::assertNotContains('inbox.bank', $paths);
+    }
+
+    public function test_an_unknown_folder_across_spellings_still_is_not_found(): void
+    {
+        // The fallback must not invent a folder: a name that matches nothing
+        // canonically is still a typed not-found, not a silent success.
+        $server = new FakeImapServer();
+        $server->folder('Archive');
+
+        $this->expectException(FolderNotFound::class);
         $this->expectExceptionMessageMatches('/NoSuchFolder/');
 
         $this->client($server)->folderStatus('NoSuchFolder');

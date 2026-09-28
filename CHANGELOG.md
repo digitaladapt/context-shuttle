@@ -6,6 +6,37 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Email: folder matching now ignores case and treats `.` and `/` as the
+  same separator, so an imperfectly-spelled real folder still matches.**
+  Folder identity is a single canonical key (`FolderIdentity`): decode the
+  IMAP mUTF-7 form, fold `.`/`/` to one separator, lower-case. `inbox/bob`,
+  `Inbox.Bob` and `INBOX/BOB` are therefore one folder, and a small model that
+  gets the formatting wrong but names the right mailbox succeeds. This
+  replaces the previous rule (exact match apart from `INBOX`, which caused
+  `list_email_folders` to report `[]` and name populated folders as
+  non-existent on a `.`-separated server — finding 29).
+- **Email: the same identity is used to resolve a folder, not just to permit
+  it.** A caller naming the server's real folder with the other separator, or
+  the wrong case, now reaches it: the client resolves the name to the server's
+  own path before issuing any command. Previously the gate and the resolver
+  could disagree, so a permitted folder could still fail to be found. The
+  server's spelling remains what is shown and what goes on the wire.
+
+- **Email: "folder does not exist" and "folder not permitted" are now distinct
+  errors.** A missing folder reached the caller as
+  `FolderNotAllowedException` ("set `IMAP_READ_FOLDERS` to allow it"), sending
+  an operator to the env file for a name they had simply misspelled; the name
+  was echoed back from the request and never validated. A missing folder is now
+  a typed `FolderNotFound` naming the folder and pointing at
+  `list_email_folders`, leaving the permission refusal to mean only permission.
+  The `list_email_folders` warning is reworded to "matched no folder" and names
+  the likely causes, rather than asserting a populated folder does not exist.
+  `FakeImapServer`'s `LIST` matching was tightened to a real server's rule
+  (case-sensitive except the `INBOX` head) — its earlier leniency on the whole
+  path is what let the casing bug pass the suite.
+
 ### Added
 
 - **Interactive-request plumbing (alerts Phase 1)**: the provider-free

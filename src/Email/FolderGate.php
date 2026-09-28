@@ -6,7 +6,6 @@ namespace App\Email;
 
 use App\Email\Domain\FolderAccess;
 use App\Email\Domain\MailFolder;
-use DirectoryTree\ImapEngine\Support\Str;
 
 /**
  * The folder gate: which operations this deployment permits on which folders.
@@ -23,17 +22,27 @@ use DirectoryTree\ImapEngine\Support\Str;
  *
  * ## Matching
  *
- * Comparisons happen on the **decoded** folder path. IMAP folder identity is
- * modified UTF-7 (finding 19): a mailbox named `Tëst-Ünicode` has the raw
- * path `T&AOs-st-&ANw-nicode`, and the library's own `Folder::is()` compares
- * raw paths — so a folder built from a human-readable name does not match
- * the discovered one. Decoding at this boundary means an operator writes
- * `Tëst-Ünicode` in `.env` and it works.
+ * Comparisons happen on a **canonical identity** — {@see FolderIdentity},
+ * which the client's own folder resolver uses too, so permission and
+ * resolution cannot disagree. A folder name is decoded from IMAP's modified
+ * UTF-7 (finding 19: a mailbox named `Tëst-Ünicode` travels as
+ * `T&AOs-st-&ANw-nicode`), its `.`/`/` hierarchy separators are folded to
+ * one, and it is lower-cased. Two names that differ only in case or separator
+ * are therefore the same mailbox: `inbox/bob`, `Inbox.Bob` and `INBOX/BOB`
+ * all denote one folder.
  *
- * `INBOX` is matched case-insensitively because IMAP requires it to be; every
- * other mailbox is case-sensitive, as the protocol says. Verified against
- * Dovecot: `find('inbox')` resolves, `find('archive')` does not. Matching
- * `Archive` case-insensitively would silently widen an operator's allowlist.
+ * This is deliberately more forgiving than the protocol. IMAP guarantees
+ * case-insensitivity only for `INBOX`, and a server treats `.` and `/` as
+ * distinct separators — but a caller naming a real folder with imperfect
+ * spelling is naming that folder, and the failure mode of refusing it is a
+ * model that reports "done" without having done anything. The cost is the one
+ * this design has always accepted in exchange: an operator cannot keep both
+ * `Archive` and `archive` (or `Bank.2026` and `Bank/2026`) as distinct
+ * mailboxes with distinct permissions. A server holding both is pathological,
+ * and ambiguous to a human too.
+ *
+ * The server's own spelling is what is **shown** and what is **sent**; only
+ * the comparison is canonical.
  *
  * ## Configuring a folder that does not exist
  *
@@ -282,20 +291,14 @@ final readonly class FolderGate
     }
 
     /**
-     * The comparable form of a folder name.
+     * The comparable form of a folder name — {@see FolderIdentity::canonical()}.
      *
-     * Decodes modified UTF-7 when the value carries the `&` marker the
-     * encoding always produces, then lowercases **only** `INBOX` — the one
-     * mailbox IMAP defines as case-insensitive.
+     * A named method rather than calling the helper inline at each site, so
+     * the rule is stated once and the class docblock's promise has a single
+     * place to be true or false.
      */
     private static function normalize(string $folder): string
     {
-        $folder = trim($folder);
-
-        if (str_contains($folder, '&')) {
-            $folder = Str::fromImapUtf7($folder);
-        }
-
-        return 'inbox' === strtolower($folder) ? 'inbox' : $folder;
+        return FolderIdentity::canonical($folder);
     }
 }

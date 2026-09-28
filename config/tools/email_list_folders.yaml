@@ -17,6 +17,9 @@ description: >
   permitted at all, and an attempt to use one fails rather than silently
   doing nothing. Folders that are neither readable nor writable are
   omitted. The message_count and unread_count fields reflect the whole
-  folder, not a page.
+  folder, not a page. Names are matched ignoring case and treating `.` and
+  `/` as the same separator, so `inbox/bob`, `Inbox.Bob` and `INBOX/BOB`
+  all name one folder; the `path` reported here is always the server's own
+  spelling, which is safest to reuse.
 handler: App\Tool\Email\ListFoldersTool::listEmailFolders
 parameters: {}
