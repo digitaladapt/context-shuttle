@@ -25,9 +25,9 @@ final class FolderNotFound extends RuntimeException
         public readonly string $folder,
     ) {
         parent::__construct(\sprintf(
-            'There is no folder named "%s" on this mail server. Folder names are case-sensitive (except the INBOX part), '
-            .'and a hierarchy may use a separator you did not expect — use list_email_folders to see the exact names, '
-            .'then check IMAP_READ_FOLDERS (and the other folder lists) for a typo or a wrong spelling.',
+            'There is no folder named "%s" on this mail server. Case and the choice of `.` or `/` do not matter here, '
+            .'so this is not a casing or separator problem — use list_email_folders to see the exact names, '
+            .'then check IMAP_READ_FOLDERS (and the other folder lists) for a typo.',
             $folder,
         ));
     }

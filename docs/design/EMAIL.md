@@ -61,7 +61,7 @@ documentation. The ones that changed the design are marked ⚠️.
 | 26 | ⚠️ *(implementation)* **`move()` always returns `NULL`, and there is no public way to read the new UID.** Dovecot answers `UID MOVE` with an **untagged** `* OK [COPYUID <uidvalidity> <old> <new>] Moved UIDs.`, but `MessageResponseParser::getUidFromCopy()` parses the **tagged** response — so the return value is null on every server that reports it the standard way, and the `Result` holding the untagged response is a private property. | `move_email` **verifies by observation**: it reads the message's `Message-ID` *before* the move, then searches the destination for it afterwards. That is what the design already asked for — `to_folder` is where the message was *observed*, not the configured value echoed back — so the defect cost a `SEARCH` rather than a redesign. A move that cannot be observed raises `MoveNotObserved` rather than reporting `moved: true`. |
 | 27 | ⚠️ *(implementation)* **`flag()` takes an `$expunge` argument that runs a mailbox-wide `EXPUNGE`.** `flag($f, '+', expunge: true)` and `move($to, expunge: true)` both call `Folder::expunge()` — one argument away from destroying mail the caller never named. | Neither is ever passed, and `ImapClient` documents why. Verified by intercepting the wire during a full write session: **zero outbound `EXPUNGE` commands**, with the only `EXPUNGE` in the log being the server's own notice that `UID MOVE` relocated the source copy. "There is no delete" is therefore structural rather than a promise about our own code. |
 | 28 | ⚠️ *(implementation, test harness)* **A fake server that answers for UIDs that do not exist hides real bugs.** The first scripted fixture matched `UID FETCH` by substring, so `find(99999)` was answered by a reply written for uid 1 — and the code under test then **tagged the wrong message and reported success**. | The fixture now only hands a `UID FETCH` reply to the id it names. Recorded because the symptom was an apparently-passing test: the bug was in the harness's model of a server, and only became visible once a test asserted that an *unknown* uid is refused. |
-| 29 | ⚠️ *(implementation, folder identity)* **A `.`-separated server reports `Inbox.Bank` as `INBOX.Bank`, and the gate's `INBOX`-only case rule missed it.** IMAP defines `INBOX` as case-insensitive, but a hierarchy built on it (`Inbox.Bank` = subfolder `Bank` of `INBOX`) is reported under the server's canonical `INBOX.` spelling regardless of how the mailbox was created. Comparing names byte-for-byte apart from `INBOX` itself meant no configured folder matched: `list_email_folders` returned `[]`, its warning named the populated folders as "not existing", yet a read naming the configured spelling still worked — three symptoms, one cause. Verified against Dovecot 2.4.1 with `separator = .`. | The gate lower-cases the `INBOX` **head segment** (both `/` and `.` separators); every later segment stays case-sensitive. Also fixed the harness: `FakeImapServer`'s `LIST` match used `strcasecmp` on the whole path, which is laxer than a real server and was why the suite stayed green. |
+| 29 | ⚠️ *(implementation, folder identity)* **A `.`-separated server reports `Inbox.Bank` as `INBOX.Bank`, and a byte-for-byte comparison missed it.** IMAP defines `INBOX` as case-insensitive, but a hierarchy built on it (`Inbox.Bank` = subfolder `Bank` of `INBOX`) is reported under the server's canonical `INBOX.` spelling regardless of how the mailbox was created. Comparing names exactly apart from `INBOX` itself meant no configured folder matched: `list_email_folders` returned `[]`, its warning named the populated folders as "not existing", yet a read naming the configured spelling still worked — three symptoms, one cause. Verified against Dovecot 2.4.1 with `separator = .`. | Folder identity is a canonical key (`FolderIdentity`): decode mUTF-7, fold `.`/`/`, lower-case. The same key is used for permission and for resolution, so a name the gate allowed is always findable. `FakeImapServer`'s `LIST` matching was also tightened to a real server's rule — its earlier `strcasecmp` on the whole path was laxer than a server and helped the bug pass the suite. |
 
 ## Configuration
 
@@ -115,12 +115,25 @@ Three deliberate properties:
   `IMAP_MOVE_TARGET_FOLDERS` are separate so an operator can allow
   "file things out of `INBOX` into `Archive`" without allowing "pull
   anything out of `Archive`".
-- **Matching is normalized and explicit.** A configured folder is resolved
-  through the same path as a discovered one, so `INBOX` matches `inbox`
-  (IMAP requires `INBOX` to be case-insensitive; every other mailbox is
-  case-sensitive) and a configured non-ASCII name matches its mUTF-7 form
-  (finding 19). An entry that matches no folder on the server is logged as a
-  configuration error at invocation, never silently ignored.
+- **Matching is normalized and explicit.** A folder name is compared by a
+  canonical identity — `FolderIdentity` — that decodes the mUTF-7 form
+  (finding 19), treats `.` and `/` as the same hierarchy separator, and
+  ignores case. So `inbox/bob`, `Inbox.Bob` and `INBOX/BOB` all name one
+  folder. This is intentionally more forgiving than the protocol (which
+  guarantees case-insensitivity only for `INBOX` and treats the two
+  separators as distinct): a caller that names a real folder with imperfect
+  spelling is naming that folder, and the failure mode of refusing it is a
+  model reporting "done" without having done anything. The one cost is that
+  two mailboxes differing only in case or separator cannot be given separate
+  permissions — pathological, and ambiguous to a human operator too. The
+  same identity is used by the client's folder resolver, so "may I?" and
+  "find it" can never disagree. An entry that matches no folder on the server
+  is logged as a configuration error at invocation, never silently ignored.
+- **The server's spelling is what is shown and sent.** Only the comparison is
+  canonical. `list_email_folders` reports the server's own path, and the
+  client resolves a caller's spelling to that real path before issuing any
+  command — a caller reading a folder name back verbatim always works, and a
+  caller that mistypes still reaches the right mailbox.
 - **A mismatch is an error a model can act on**, naming the operation, the
   folder, and the env var that would allow it — mirroring the alerts
   tools' "not configured" convention.
@@ -538,7 +551,7 @@ UTF-8 literal, not the mUTF-7 conversion.
 | attachment metadata without a body fetch | finding 13 |
 | oversized message is declined, not fetched | finding 14 |
 | ordering is by date then UID, across repeated calls | finding 16 |
-| `INBOX` matches case-insensitively; `Archive` does not | finding 19 |
+| folder identity ignores case and the `.`/`/` separator | findings 19, 29 |
 | a folder outside the operation's allowlist is refused | the gate itself |
 | `tag_email` refuses a `\`-prefixed tag | finding 23 — the ungated `\Deleted` path |
 | free-text search terms are sent bare, not `%wrapped%` | finding 24 — the silent zero-match |

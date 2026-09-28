@@ -243,13 +243,13 @@ final class FakeImapServer
 
         foreach ($this->folders as $path => $flags) {
             // `*` matches everything; otherwise the pattern is the folder name
-            // the library is looking for. Matching is case-sensitive, as a
-            // real server is, **except** the `INBOX` reference — and only its
-            // first segment, so `INBOX.Bank` answers for `Inbox.Bank` but
-            // `Bank` stays case-sensitive. An over-lenient `strcasecmp` here
-            // let a casing bug in the folder gate pass the suite, which is
-            // exactly the kind of difference between a fake and a real server
-            // that a fixture must not paper over.
+            // the library is looking for. Matching follows a real server: exact
+            // except the leading `INBOX` segment, which IMAP defines as
+            // case-insensitive. The separator is **not** special-cased here — a
+            // real server treats `.` and `/` as different mailboxes. That is
+            // deliberate: the client's identity fallback (which makes `.` and
+            // `/` interchangeable) is what the tests exercise, and a lenient
+            // fake would hide whether that fallback works.
             $matchesPattern = '*' === $pattern || self::sameMailbox($pattern, $path);
 
             if (!$matchesPattern) {

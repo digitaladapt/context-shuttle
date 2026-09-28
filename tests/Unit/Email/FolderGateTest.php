@@ -79,15 +79,18 @@ final class FolderGateTest extends TestCase
         self::assertTrue($gate->allows(FolderGate::OPERATION_READ, 'INBOX'));
     }
 
-    public function test_other_folders_are_ca_se_sensitive(): void
+    public function test_matching_is_case_insensitive_for_every_folder_not_just_inbox(): void
     {
+        // Deliberate: a caller (often a small model) that changes the case of
+        // a real folder is still naming that folder. The trade is that an
+        // operator cannot keep `Archive` and `archive` as distinct mailboxes
+        // — a server holding both is pathological, and ambiguous to a human.
         $gate = new FolderGate(readFolders: 'Archive');
 
         self::assertTrue($gate->allows(FolderGate::OPERATION_READ, 'Archive'));
-
-        // Matching these would silently widen an operator's allowlist.
-        self::assertFalse($gate->allows(FolderGate::OPERATION_READ, 'archive'));
-        self::assertFalse($gate->allows(FolderGate::OPERATION_READ, 'ARCHIVE'));
+        self::assertTrue($gate->allows(FolderGate::OPERATION_READ, 'archive'));
+        self::assertTrue($gate->allows(FolderGate::OPERATION_READ, 'ARCHIVE'));
+        self::assertTrue($gate->allows(FolderGate::OPERATION_READ, 'aRcHiVe'));
     }
 
     public function test_non_ascii_folders_match_across_the_imap_utf7_boundary(): void
@@ -231,26 +234,64 @@ final class FolderGateTest extends TestCase
         self::assertTrue($gate->allows(FolderGate::OPERATION_READ, 'INBOX/Reports'));
     }
 
-    public function test_only_the_inbox_head_is_case_insensitive_not_the_rest(): void
+    public function test_case_is_ignored_all_the_way_down_a_hierarchy(): void
     {
-        // The head exemption must not leak down the path: `Bank` is a
-        // subfolder and stays case-sensitive, exactly as before.
+        // Not just the head: `Bank` is as much a folder as `INBOX` is, and a
+        // caller that shouts the whole path still names it.
         $gate = new FolderGate(readFolders: 'Inbox.Bank');
 
         self::assertTrue($gate->allows(FolderGate::OPERATION_READ, 'INBOX.Bank'));
-        self::assertFalse($gate->allows(FolderGate::OPERATION_READ, 'INBOX.bank'));
-        self::assertFalse($gate->allows(FolderGate::OPERATION_READ, 'INBOX.BANK'));
+        self::assertTrue($gate->allows(FolderGate::OPERATION_READ, 'INBOX.bank'));
+        self::assertTrue($gate->allows(FolderGate::OPERATION_READ, 'INBOX.BANK'));
+        self::assertTrue($gate->allows(FolderGate::OPERATION_READ, 'inbox.bank'));
     }
 
-    public function test_a_non_inbox_hierarchy_stays_case_sensitive(): void
+    public function test_a_non_inbox_hierarchy_is_also_case_insensitive(): void
     {
-        // `Archive` is not `INBOX`, so nothing about it is case-insensitive —
-        // matching it either way would silently widen an allowlist.
         $gate = new FolderGate(readFolders: 'Archive.2026');
 
         self::assertTrue($gate->allows(FolderGate::OPERATION_READ, 'Archive.2026'));
-        self::assertFalse($gate->allows(FolderGate::OPERATION_READ, 'archive.2026'));
-        self::assertFalse($gate->allows(FolderGate::OPERATION_READ, 'ARCHIVE.2026'));
+        self::assertTrue($gate->allows(FolderGate::OPERATION_READ, 'archive.2026'));
+        self::assertTrue($gate->allows(FolderGate::OPERATION_READ, 'ARCHIVE.2026'));
+    }
+
+    // ── The `.` / `/` separator is not part of folder identity ──────────
+
+    public function test_either_separator_names_the_same_folder(): void
+    {
+        // Both are established hierarchy separators, and which one a server
+        // uses is a property of the server, not of the mailbox. A name
+        // configured with one and reported with the other is one folder.
+        $gate = new FolderGate(readFolders: 'INBOX.Bank');
+
+        self::assertTrue($gate->allows(FolderGate::OPERATION_READ, 'INBOX/Bank'));
+        self::assertTrue($gate->allows(FolderGate::OPERATION_READ, 'inbox/bank'));
+        self::assertTrue($gate->allows(FolderGate::OPERATION_READ, 'Inbox.Bank'));
+    }
+
+    public function test_case_and_separator_fold_together(): void
+    {
+        // The three spellings the design calls out as identical: they must
+        // all grant the same permission whether the config uses `/` or `.`.
+        foreach (['inbox/bob', 'Inbox.Bob', 'INBOX/BOB'] as $configured) {
+            $gate = new FolderGate(readFolders: $configured);
+
+            foreach (['inbox/bob', 'Inbox.Bob', 'INBOX/BOB', 'INBOX.BOB', 'inbox.bob'] as $asked) {
+                self::assertTrue(
+                    $gate->allows(FolderGate::OPERATION_READ, $asked),
+                    \sprintf('config %s must match %s', $configured, $asked),
+                );
+            }
+        }
+    }
+
+    public function test_a_separator_difference_is_not_reported_as_unmatched(): void
+    {
+        // The listing warning says "matched no folder", so it must agree with
+        // the rule the permission check uses.
+        $gate = new FolderGate(readFolders: 'INBOX.Bank,INBOX/Net');
+
+        self::assertSame([], $gate->unmatched(['INBOX', 'INBOX/Bank', 'INBOX.Net']));
     }
 
     public function test_an_inbox_subfolder_is_not_reported_as_unmatched(): void

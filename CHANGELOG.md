@@ -8,20 +8,21 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **Email: `list_email_folders` reported an empty list, and named populated
-  folders as non-existent, on a `.`-separated server.** The folder gate
-  compared folder names byte-for-byte apart from `INBOX` itself, but on such a
-  server a mailbox created (and configured) as `Inbox.Bank` is reported by
-  `LIST` under the server's canonical **`INBOX.Bank`** — `Inbox.` names a
-  subfolder of the case-insensitive `INBOX`. Exact matching therefore failed: no
-  configured folder matched, so every folder was dropped from the listing
-  (`"folders": [], "count": 0`), and `unmatched()` reported the same populated
-  folders under its "do not exist" warning. Reads still worked when a caller
-  happened to pass the configured spelling, which is why the two symptoms
-  looked contradictory. The gate now lower-cases the **`INBOX` head segment**
-  of a hierarchical name (both `/` and `.` separators), and every later segment
-  stays case-sensitive. Verified against Dovecot 2.4.1 with `separator = .`
-  (finding 29).
+- **Email: folder matching now ignores case and treats `.` and `/` as the
+  same separator, so an imperfectly-spelled real folder still matches.**
+  Folder identity is a single canonical key (`FolderIdentity`): decode the
+  IMAP mUTF-7 form, fold `.`/`/` to one separator, lower-case. `inbox/bob`,
+  `Inbox.Bob` and `INBOX/BOB` are therefore one folder, and a small model that
+  gets the formatting wrong but names the right mailbox succeeds. This
+  replaces the previous rule (exact match apart from `INBOX`, which caused
+  `list_email_folders` to report `[]` and name populated folders as
+  non-existent on a `.`-separated server — finding 29).
+- **Email: the same identity is used to resolve a folder, not just to permit
+  it.** A caller naming the server's real folder with the other separator, or
+  the wrong case, now reaches it: the client resolves the name to the server's
+  own path before issuing any command. Previously the gate and the resolver
+  could disagree, so a permitted folder could still fail to be found. The
+  server's spelling remains what is shown and what goes on the wire.
 
 - **Email: "folder does not exist" and "folder not permitted" are now distinct
   errors.** A missing folder reached the caller as

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Email\Imap;
 
+use App\Email\FolderIdentity;
 use DirectoryTree\ImapEngine\Connection\ConnectionInterface;
 use DirectoryTree\ImapEngine\Connection\Responses\Data\ListData;
 use DirectoryTree\ImapEngine\Connection\Tokens\Literal;
@@ -480,6 +481,17 @@ final readonly class ImapClient
         return $this->connection->with(function (Mailbox $mailbox) use ($path, $uid, $destination): ?array {
             $source = $this->findFolder($mailbox, $path);
 
+            // The destination is resolved to the server's own path *before*
+            // the `MOVE`, because `MOVE` takes a literal mailbox name: a
+            // caller's `inbox/bank` would be refused by a `.`-separated
+            // server even though the gate permitted it. Resolving on identity
+            // keeps "may I move it there?" and "where does it go?" the same
+            // question. An unresolvable destination is a not-found, named.
+            $target = $this->findFolderByIdentity($mailbox, $destination)
+                ?? throw new FolderNotFound($destination);
+
+            $destination = $this->decode($target->path());
+
             $message = $source->messages()->withHeaders()->withFlags()->find($uid);
 
             if (null === $message) {
@@ -513,7 +525,11 @@ final readonly class ImapClient
      */
     private function locate(Mailbox $mailbox, string $destination, ?string $messageId, ?int $reportedUid): ?array
     {
-        $folder = $mailbox->folders()->find($destination);
+        // The destination here is already the server's own path (resolved in
+        // `moveMessage()`), so the exact `find()` is the normal case; the
+        // identity scan is a safety net for a server that re-spells it.
+        $folder = $mailbox->folders()->find($destination)
+            ?? $this->findFolderByIdentity($mailbox, $destination);
 
         if (null === $folder) {
             return null;
@@ -858,7 +874,21 @@ final readonly class ImapClient
 
     private function findFolder(Mailbox $mailbox, string $path): FolderInterface
     {
+        // Fast path: the library's own `find()` issues one `LIST` for the
+        // exact name, which is what a caller passing the server's own
+        // spelling (as `list_email_folders` reports it) will hit.
         $folder = $mailbox->folders()->find($path);
+
+        if (null !== $folder) {
+            return $folder;
+        }
+
+        // Slow path: the caller named a real folder with imperfect spelling —
+        // the wrong case, or the other hierarchy separator. Resolve it the way
+        // the gate judged it, on canonical identity, so "may I?" and "find it"
+        // can never disagree. This costs one full `LIST`, which is why it is
+        // only reached on a miss.
+        $folder = $this->findFolderByIdentity($mailbox, $path);
 
         if (null === $folder) {
             // The gate has already let this folder through, so a miss here
@@ -871,6 +901,26 @@ final readonly class ImapClient
         }
 
         return $folder;
+    }
+
+    /**
+     * The real folder whose *identity* matches `$path`.
+     *
+     * Compares the server's decoded paths through
+     * {@see FolderIdentity::equals()}, the same function the folder gate uses
+     * to decide permission — so a name the gate allowed is a name this can
+     * find. The returned folder keeps the server's own path; that is what gets
+     * selected and what appears in results.
+     */
+    private function findFolderByIdentity(Mailbox $mailbox, string $path): ?FolderInterface
+    {
+        foreach ($mailbox->folders()->get() as $candidate) {
+            if (FolderIdentity::equals($this->decode($candidate->path()), $path)) {
+                return $candidate;
+            }
+        }
+
+        return null;
     }
 
     /**
