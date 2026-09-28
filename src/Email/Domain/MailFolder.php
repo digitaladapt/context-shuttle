@@ -12,13 +12,18 @@ namespace App\Email\Domain;
  * the reference server's `displayname` equivalent returned a path, so a name
  * is never a key.
  *
- * `path` is the **decoded** form. Internally IMAP folder identity is
- * modified UTF-7 (finding 19: a mailbox named `Tëst-Ünicode` has the raw
- * path `T&AOs-st-&ANw-nicode`), and the library's own folder comparison
- * uses the raw form — so a folder built from a human-readable name does not
- * match the discovered one. Decoding once, at the boundary, means every
- * comparison above this point — allowlists, tool arguments, output — speaks
- * the name the operator typed.
+ * `path` is the **decoded** form, and it is the **server's own spelling**.
+ * Internally IMAP folder identity is modified UTF-7 (finding 19: a mailbox
+ * named `Tëst-Ünicode` has the raw path `T&AOs-st-&ANw-nicode`), and the
+ * library's own folder comparison uses the raw form — so decoding once, at
+ * the boundary, means every comparison above this point speaks a
+ * human-readable name.
+ *
+ * Comparisons do not use this string directly: two names that differ only in
+ * case or in `.`-vs-`/` may denote the same mailbox, and
+ * {@see \App\Email\FolderIdentity} is what decides that. `path` stays the
+ * server's spelling because that is what a caller should read, echo and pass
+ * back — a normalized name would misdescribe what is on the server.
  */
 final readonly class MailFolder
 {

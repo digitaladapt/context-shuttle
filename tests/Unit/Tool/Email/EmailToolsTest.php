@@ -151,6 +151,42 @@ final class EmailToolsTest extends TestCase
         }
     }
 
+    public function test_a_tool_call_with_the_other_separator_succeeds(): void
+    {
+        // The bonus the design asks for: a small model names a real folder
+        // with the wrong separator. The server has `INBOX/Bank`, the call says
+        // `INBOX.Bank`, and it works — the tool reports the folder it actually
+        // read, in the server's own spelling.
+        $server = new FakeImapServer();
+        $server->folder('INBOX/Bank');
+        $server->selectable(0);
+        $server->status('INBOX/Bank', 0, 0);
+        $server->on('UID SEARCH', ['* SEARCH']);
+
+        $result = $this->listTool($server, readFolders: 'INBOX.Bank')
+            ->listEmails(folder: 'INBOX.Bank');
+
+        self::assertSame([], $result['emails']);
+        // The command went to the server's real folder, not the caller's typo.
+        self::assertStringContainsString('INBOX/Bank', $server->commandLog());
+    }
+
+    public function test_a_tool_call_with_the_wrong_case_succeeds(): void
+    {
+        $server = new FakeImapServer();
+        $server->folder('INBOX/Bank');
+        $server->selectable(0);
+        $server->status('INBOX/Bank', 0, 0);
+        $server->on('UID SEARCH', ['* SEARCH']);
+
+        // Config in one spelling, allowlist judgement in another, folder on
+        // the wire in a third — all one folder.
+        $result = $this->listTool($server, readFolders: 'inbox.bank')
+            ->listEmails(folder: 'Inbox.BANK');
+
+        self::assertSame([], $result['emails']);
+    }
+
     public function test_an_invalid_date_is_rejected(): void
     {
         $server = new FakeImapServer();

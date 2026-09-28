@@ -242,12 +242,15 @@ final class FakeImapServer
         $replies = [];
 
         foreach ($this->folders as $path => $flags) {
-            // `*` matches everything; otherwise the pattern is the exact
-            // folder name the library is looking for. `INBOX` is matched
-            // case-insensitively because IMAP requires it.
-            $matchesPattern = '*' === $pattern
-                || 0 === strcasecmp($pattern, $path)
-                || ('inbox' === strtolower($path) && 'inbox' === strtolower($pattern));
+            // `*` matches everything; otherwise the pattern is the folder name
+            // the library is looking for. Matching follows a real server: exact
+            // except the leading `INBOX` segment, which IMAP defines as
+            // case-insensitive. The separator is **not** special-cased here — a
+            // real server treats `.` and `/` as different mailboxes. That is
+            // deliberate: the client's identity fallback (which makes `.` and
+            // `/` interchangeable) is what the tests exercise, and a lenient
+            // fake would hide whether that fallback works.
+            $matchesPattern = '*' === $pattern || self::sameMailbox($pattern, $path);
 
             if (!$matchesPattern) {
                 continue;
@@ -257,5 +260,24 @@ final class FakeImapServer
         }
 
         return $replies;
+    }
+
+    /**
+     * Whether two folder names name the same mailbox on a real server.
+     *
+     * Case-sensitive everywhere except the leading `INBOX` segment, which
+     * IMAP defines as case-insensitive; the separator may be `/` or `.`.
+     */
+    private static function sameMailbox(string $a, string $b): bool
+    {
+        $norm = static function (string $name): string {
+            $head = substr($name, 0, strcspn($name, './'));
+
+            return 'inbox' === strtolower($head)
+                ? 'inbox'.substr($name, \strlen($head))
+                : $name;
+        };
+
+        return $norm($a) === $norm($b);
     }
 }
