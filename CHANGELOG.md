@@ -39,6 +39,44 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Memory tools (`memory_recall`, `memory_remember`, `memory_keys`,
+  `memory_stats`, `memory_forget`).** A keyword-addressed memory store, for
+  the question *"what do I know about X?"* — configured by `MEMORY_DRAFT_URL`,
+  pointing at a memory-draft instance.
+
+  **The URL is the opt-in, and the whole permission model.** memory-draft has
+  no authentication and no per-operation permissions, so there is nothing
+  finer to gate on. With the variable empty, none of the five tools is
+  registered — they are absent from `tools/list` rather than listed and
+  refusing — which matters most for `memory_forget`, the one irreversible verb
+  in the family. This is deliberate divergence from the *read* tools
+  elsewhere, which stay listed unconfigured and explain themselves: those read
+  services whose address is incidental to the question, whereas here the URL
+  *is* the resource.
+
+  The store's own semantics are passed through untouched, because
+  re-deciding them here would be a second implementation that can disagree
+  with the first: a miss is a 200 with near-miss suggestions (not an error);
+  spelling variants resolve in the same round trip (`resolved_from`); trimming
+  demotes to cold storage rather than deleting and `replace` retires rather
+  than destroys; a write against a stale revision is kept and flagged
+  (`backfill`) instead of dropped.
+
+  Two things the tool decides, because they are transport rather than policy:
+  a `remember` with nothing to store and a `forget` with no key are refused
+  before the request, since upstream both would read as success; and a 404 on
+  an API path names `MEMORY_DRAFT_URL`, because a URL that answers but not
+  with this API is a configuration mistake, not an empty result.
+
+- **Tool requirements are now named tokens, not a boolean.** `requires_writes:
+  true` becomes `requires: calendar_writes`, and `ToolAvailability`
+  implementations are composed by a new `ChainedToolAvailability` instead of
+  one gate owning the whole decision. A gate answers only for the
+  requirement it owns and allows everything else, so adding a family is
+  adding a gate — and a requirement no gate claims is allowed, which makes a
+  forgotten gate produce a listed tool that refuses (today's behaviour for
+  every unconfigured tool) rather than one that vanishes unexplainably.
+
 - **Interactive-request plumbing (alerts Phase 1)**: the provider-free
   half of the `ask_user` family, per `docs/design/ALERTS.md`.
   - `GET /ask/{id}` — the single-use answer page (Twig, no JS, no

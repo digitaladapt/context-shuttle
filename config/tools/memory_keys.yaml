@@ -1,0 +1,26 @@
+# Memory keys — what is stored, so a caller never has to guess a key name.
+#
+# `requires: memory_store` — see memory_recall.yaml.
+name: memory_keys
+description: >-
+  List the keywords this memory holds, with each one's revision, sentence
+  counts per tier (hot, cold, backfilled), recorded aliases and how long
+  ago it was written. Call this before asking for something by name: a
+  keyword store punishes a guessed key with a miss, which looks exactly
+  like "nothing is known". The revision is the value to pass back to
+  memory_remember when writing against what you just read. Results are
+  ordered by most recently written, so what the store has been thinking
+  about is at the top.
+requires: memory_store
+handler: App\Tool\MemoryDraft\MemoryDraftTool::keys
+parameters:
+  pattern:
+    type: string
+    description: 'Optional substring filter on key names, e.g. "project" or "deploy". Omit to list everything.'
+    required: false
+  limit:
+    type: integer
+    description: 'Maximum keys to return (default: 200). Raise it when a pattern may match more than that.'
+    required: false
+    minimum: 1
+    maximum: 1000

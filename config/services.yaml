@@ -14,6 +14,7 @@ parameters:
     env(CALDAV_EDITABLE_CALENDAR): ''
     env(ICS_URL): ''
     env(ICS_NAME): 'ics'
+    env(MEMORY_DRAFT_URL): ''
     env(NTFY_URL): ''
     env(NTFY_TOPIC): ''
     env(NTFY_TOKEN): ''
@@ -43,6 +44,14 @@ parameters:
     # Vital-pulse tool configuration, same pattern as penny-track above.
     vitalpulse_url: '%env(string:default::VITALPULSE_URL)%'
     vitalpulse_api_key: '%env(string:default::VITALPULSE_API_KEY)%'
+
+    # Memory-draft tool configuration. The URL is both the address and the
+    # opt-in: memory-draft has no authentication, so there is nothing finer
+    # to gate on, and with this empty the whole memory_* family is absent
+    # from the tool list rather than listed and refusing. Like CALDAV_URL it
+    # is NOT probed at boot — a memory store being down must never stop
+    # context-shuttle from starting.
+    memory_draft_url: '%env(string:default::MEMORY_DRAFT_URL)%'
 
     # Calendar tool configuration. CALDAV_URL is NOT probed at boot: a
     # calendar server being down must never stop context-shuttle from
@@ -211,6 +220,18 @@ services:
             $baseUrl: '%vitalpulse_url%'
             $apiKey: '%vitalpulse_api_key%'
 
+    # ── Memory-draft ────────────────────────────────────────────────────
+    # The endpoint is a service because two places need the same answer: the
+    # gate deciding whether the memory tools exist, and the tool deciding
+    # where to send a request. MEMORY_DRAFT_URL is NOT probed at boot: a
+    # memory store being down must never stop context-shuttle from starting.
+    App\MemoryDraft\MemoryDraftEndpoint:
+        arguments:
+            $configured: '%memory_draft_url%'
+
+    App\Tool\MemoryDraft\MemoryDraftTool:
+        public: true
+
     # ── Calendar ────────────────────────────────────────────────────────
     App\Calendar\Domain\TimeZoneRule:
         arguments:
@@ -263,11 +284,22 @@ services:
             $logger: '@monolog.logger.mcp_invocation'
 
     # The registry's availability gate is wired here because the registry
-    # itself is registered by ToolRegistryPass. Pinned to the calendar gate
-    # explicitly rather than autowired: with a second ToolAvailability
-    # implementation, autowiring would pick one arbitrarily and the write
-    # tools' visibility would depend on service ordering.
-    App\ToolRegistry\ToolAvailability: '@App\Calendar\CalendarWriteGate'
+    # itself is registered by ToolRegistryPass. Every gate is composed
+    # explicitly rather than autowired: with more than one ToolAvailability
+    # implementation, autowiring would pick one arbitrarily and a tool's
+    # visibility would depend on service ordering. List them all here; the
+    # chain allows a tool when every gate that owns its requirement allows
+    # it, and a tool no gate claims is served.
+    App\MemoryDraft\MemoryDraftGate:
+        arguments:
+            $endpoint: '@App\MemoryDraft\MemoryDraftEndpoint'
+
+    App\ToolRegistry\ToolAvailability:
+        class: App\ToolRegistry\ChainedToolAvailability
+        arguments:
+            $gates:
+                - '@App\Calendar\CalendarWriteGate'
+                - '@App\MemoryDraft\MemoryDraftGate'
 
     App\Tool\Calendar\ListEventsTool:
         public: true

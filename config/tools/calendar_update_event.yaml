@@ -1,7 +1,7 @@
 # Calendar event update.
 #
 # The companion to calendar_create_event, and like it only registered when a
-# calendar has been named for writing (`requires_writes`).
+# calendar has been named for writing (`requires: calendar_writes`).
 #
 # The description leads on the two things a caller cannot infer: that the id
 # decides the scope, and that omitted fields are left alone.
@@ -17,7 +17,7 @@ description: >
   all-day event, never the offset-bearing form listings return. If the event
   was changed elsewhere since you read it the update is refused rather than
   overwriting, so re-read it with calendar_get_event and try again.
-requires_writes: true
+requires: calendar_writes
 handler: App\Tool\Calendar\UpdateEventTool::updateEvent
 parameters:
   id:

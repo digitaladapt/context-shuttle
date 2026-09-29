@@ -1,0 +1,25 @@
+# Memory forget — the one destructive operation in this family.
+#
+# `requires: memory_store` — see memory_recall.yaml. The gate matters most
+# here: on a deployment with no memory store there is no forget verb for a
+# model to find, and on one with a store the tool's description is the only
+# warning it gets that this does not demote, retire or archive.
+name: memory_forget
+description: >-
+  Permanently delete a keyword and every sentence stored under it. There is
+  no undo and nothing is retained: this is the only memory operation that
+  destroys anything — every other path either appends, demotes old
+  sentences to cold, or retires them so they remain retrievable. Use it
+  when the fact itself is wrong and keeping it in cold storage would be a
+  liability (a stale credential, a superseded decision). If the only
+  problem is that the fact is old or no longer current, prefer
+  memory_remember with mode replace: it retires the current sentences
+  instead of destroying them. If no key matches, nothing is deleted and
+  the call says so.
+requires: memory_store
+handler: App\Tool\MemoryDraft\MemoryDraftTool::forget
+parameters:
+  key:
+    type: string
+    description: 'The keyword to delete, e.g. "context-shuttle". Spelling variants resolve to the same key, so ContextShuttle deletes what context-shuttle names.'
+    required: true

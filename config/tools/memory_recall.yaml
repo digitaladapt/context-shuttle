@@ -1,0 +1,39 @@
+# Memory recall — what does this deployment know about a keyword?
+#
+# The memory tools only exist when a store has been named (`requires:
+# memory_store`): memory-draft has no authentication and no per-operation
+# permissions to gate on, so naming an instance is the whole opt-in. With
+# MEMORY_DRAFT_URL unset the family is absent from tools/list entirely.
+#
+# The description leads on the two things a model must know to use this
+# well: a miss is a normal answer (with suggestions), and recall is a batch
+# so several keywords cost one round trip.
+name: memory_recall
+description: >-
+  Look up what is remembered about one or more keywords, by name. Each
+  keyword resolves independently, so a batch returns hits and misses
+  separately and one miss does not spoil the others. A miss is a normal
+  answer, not an error: it arrives with suggestions of nearby keys that
+  are stored, so a keyword that is spelled differently can be found in the
+  same round trip (ContextShuttle, context-shuttle and context_shuttle are
+  all one key). Every hit carries its revision — when you intend to write,
+  pass that revision back to memory_remember so a concurrent change is
+  detected rather than overwritten. Results are ordered newest first.
+requires: memory_store
+handler: App\Tool\MemoryDraft\MemoryDraftTool::recall
+parameters:
+  keys:
+    type: array
+    description: 'Keywords to look up, e.g. ["context-shuttle", "deploy"]. At least one. Spellings are resolved, so near misses still find a stored key.'
+    required: true
+    items:
+      type: string
+  depth:
+    type: integer
+    description: 'Sentences to return per keyword, newest first (default: 2). Raise it when you expect several facts under one key.'
+    required: false
+    minimum: 1
+  include_cold:
+    type: boolean
+    description: 'Include demoted (cold) sentences. Trimming moves old sentences to cold rather than deleting them, so this is for "nothing recent, what about older?" — use it before concluding a key only says what it says.'
+    required: false

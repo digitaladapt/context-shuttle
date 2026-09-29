@@ -161,6 +161,50 @@ final class YamlToolRegistrar
                 idempotentHint: true,
                 openWorldHint: true,
             ),
+            // Memory reads. openWorldHint is true because the answers come
+            // from a store this deployment talks to, not from the prompt.
+            'memory_recall' => new ToolAnnotations(
+                title: 'Recall memory',
+                readOnlyHint: true,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: true,
+            ),
+            'memory_keys' => new ToolAnnotations(
+                title: 'List memory keys',
+                readOnlyHint: true,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: true,
+            ),
+            'memory_stats' => new ToolAnnotations(
+                title: 'Memory stats',
+                readOnlyHint: true,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: true,
+            ),
+            // Writing is not idempotent: appending the same sentences twice
+            // is two batches, and `replace` retires what was there. Not
+            // destructive either — nothing a write does is unrecoverable —
+            // which is exactly the distinction that keeps a confirmation
+            // prompt from being raised on every memory write.
+            'memory_remember' => new ToolAnnotations(
+                title: 'Remember',
+                readOnlyHint: false,
+                destructiveHint: false,
+                idempotentHint: false,
+                openWorldHint: true,
+            ),
+            // The one destructive memory verb, and the hint a client uses to
+            // ask before running it.
+            'memory_forget' => new ToolAnnotations(
+                title: 'Forget a key',
+                readOnlyHint: false,
+                destructiveHint: true,
+                idempotentHint: false,
+                openWorldHint: true,
+            ),
             // send_alert talks to the outside world and is not idempotent: the
             // one tool whose hints should make a confirmation prompt look right.
             'send_alert' => new ToolAnnotations(

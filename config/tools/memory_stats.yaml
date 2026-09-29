@@ -1,0 +1,13 @@
+# Memory stats — how much is stored, and what the trimming budgets are.
+#
+# `requires: memory_store` — see memory_recall.yaml.
+name: memory_stats
+description: >-
+  Counts for the whole memory: keys, hot and cold sentences, pinned and
+  backfilled sentences, plus the active trimming budgets (caps). The caps
+  are what make the counts interpretable — they say how many unpinned
+  sentences one key keeps before the oldest are demoted to cold, and how
+  many cold ones it keeps before the store's only deletion. No parameters.
+requires: memory_store
+handler: App\Tool\MemoryDraft\MemoryDraftTool::stats
+parameters: {}

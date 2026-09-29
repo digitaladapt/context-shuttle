@@ -1,6 +1,6 @@
 # Calendar event creation.
 #
-# `requires_writes: true` means this tool is only registered when a calendar
+# `requires: calendar_writes` means this tool is only registered when a calendar
 # has been named for writing. On a deployment that has not opted in it is
 # absent from tools/list entirely rather than listed and refusing — a model
 # cannot attempt a mutation it cannot see.
@@ -18,7 +18,7 @@ description: >
   all-day event to get a single day. Returns the uid, and the created event
   can then be fetched with calendar_get_event or found with
   calendar_list_events. Changing an event is calendar_update_event.
-requires_writes: true
+requires: calendar_writes
 handler: App\Tool\Calendar\CreateEventTool::createEvent
 parameters:
   summary:
