@@ -25,6 +25,8 @@ use Override;
  */
 final readonly class CalendarWriteGate implements ToolAvailability
 {
+    public const REQUIREMENT = 'calendar_writes';
+
     public function __construct(
         private EditableCalendar $editableCalendar,
     ) {
@@ -33,7 +35,7 @@ final readonly class CalendarWriteGate implements ToolAvailability
     #[Override]
     public function allows(ToolDefinition $definition): bool
     {
-        if (!$definition->requiresWrites) {
+        if (self::REQUIREMENT !== $definition->requires) {
             return true;
         }
 

@@ -33,14 +33,14 @@ use Symfony\Component\Yaml\Yaml;
  */
 final class CalendarWriteGateTest extends TestCase
 {
-    private function definition(string $name, bool $requiresWrites): ToolDefinition
+    private function definition(string $name, ?string $requires = null): ToolDefinition
     {
         return new ToolDefinition(
             name: $name,
             description: 'd',
             handler: 'strlen',
             parameters: [],
-            requiresWrites: $requiresWrites,
+            requires: $requires,
         );
     }
 
@@ -50,10 +50,10 @@ final class CalendarWriteGateTest extends TestCase
     private function mixedDefinitions(): array
     {
         return [
-            $this->definition('calendar_list_events', false),
-            $this->definition('calendar_create_event', true),
-            $this->definition('calendar_update_event', true),
-            $this->definition('calendar_delete_event', true),
+            $this->definition('calendar_list_events'),
+            $this->definition('calendar_create_event', CalendarWriteGate::REQUIREMENT),
+            $this->definition('calendar_update_event', CalendarWriteGate::REQUIREMENT),
+            $this->definition('calendar_delete_event', CalendarWriteGate::REQUIREMENT),
         ];
     }
 
@@ -139,9 +139,10 @@ final class CalendarWriteGateTest extends TestCase
         self::assertNotSame([], $writes, 'the write tools should exist in config/tools');
 
         foreach ($writes as $definition) {
-            self::assertTrue(
-                $definition->requiresWrites,
-                \sprintf('tool "%s" mutates, so it must declare requires_writes', $definition->name),
+            self::assertSame(
+                CalendarWriteGate::REQUIREMENT,
+                $definition->requires,
+                \sprintf('tool "%s" mutates, so it must declare requires: calendar_writes', $definition->name),
             );
         }
 
@@ -149,8 +150,8 @@ final class CalendarWriteGateTest extends TestCase
         // change whether a caller can read anything.
         foreach ($definitions as $definition) {
             if (str_starts_with($definition->name, 'calendar_list_') || str_starts_with($definition->name, 'calendar_get_')) {
-                self::assertFalse(
-                    $definition->requiresWrites,
+                self::assertNull(
+                    $definition->requires,
                     \sprintf('tool "%s" only reads, so it must not require writes', $definition->name),
                 );
             }
@@ -173,7 +174,7 @@ final class CalendarWriteGateTest extends TestCase
             $raw = Yaml::parseFile($file);
             self::assertIsArray($raw);
 
-            if (!($raw['requires_writes'] ?? false)) {
+            if (CalendarWriteGate::REQUIREMENT !== ($raw['requires'] ?? null)) {
                 continue;
             }
 

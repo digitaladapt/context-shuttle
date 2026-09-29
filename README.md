@@ -179,10 +179,74 @@ All configuration via environment variables — see `.env.example`. Key vars:
 | `ICS_URL` | empty | An http(s) iCalendar feed to read as a second calendar source |
 | `ICS_NAME` | `ics` | Display name for the feed's synthetic calendar |
 | `TZ` | `UTC` | The timezone every calendar timestamp is rendered in, and date inputs are read in |
+| `MEMORY_DRAFT_URL` | empty | **The memory opt-in.** Base URL of a memory-draft instance; empty means *no* `memory_*` tool is registered at all |
 
 Alert channels are enabled by presence: set `NTFY_TOPIC`, `DISCORD_WEBHOOK_URL`,
 or both — every enabled channel receives every alert, and `send_alert` reports
 delivery per channel.
+
+Alert channels are enabled by presence: set `NTFY_TOPIC`, `DISCORD_WEBHOOK_URL`,
+or both — every enabled channel receives every alert, and `send_alert` reports
+delivery per channel.
+
+### Memory access
+
+Five tools backed by a [memory-draft](https://github.com/digitaladapt/memory-draft)
+instance: `memory_recall`, `memory_remember`, `memory_keys`, `memory_stats`,
+`memory_forget`. The premise is that a model repeatedly needs to answer *"what
+do I know about X?"*, and that the cheapest useful answer is a sentence or two
+retrieved **by name** — no embeddings, no ranking model.
+
+```bash
+curl -X POST http://127.0.0.1:8000/tools/memory_remember \
+  -H 'Content-Type: application/json' \
+  -d '{"key":"deploy","sentences":"Uses blue-green deploys. Rollback is one command."}'
+
+curl -X POST http://127.0.0.1:8000/tools/memory_recall \
+  -H 'Content-Type: application/json' -d '{"keys":["deploy"]}'
+```
+
+**`MEMORY_DRAFT_URL` empty means there is no memory tool surface at all.** The
+family does not appear in `tools/list`, so a model cannot recall, write to, or
+forget a store the operator did not name — and `memory_forget` is the one
+irreversible verb in it. That is deliberate divergence from the *read* tools
+elsewhere (penny-track, vital-pulse, the calendar reads), which stay listed on
+an unconfigured deployment and explain themselves: those read services whose
+address is incidental to the question being asked, whereas here the URL *is*
+the resource, and a recall from a store nobody named is not a configuration
+problem worth reporting.
+
+memory-draft has **no authentication and no per-operation permissions**, so
+there is nothing finer to gate on than the URL. Anyone who can reach an
+instance can read and write it; run it on a network you trust, and treat its
+contents as sensitive as the facts you put in it.
+
+Four behaviours come from the store and are passed through untouched, because
+re-deciding them here would be a second implementation that can disagree with
+the first:
+
+- **A miss is an answer.** A recall that matches nothing is a success carrying
+  `suggestions` of nearby keys — never an error. Spelling variants
+  (`ContextShuttle`, `context-shuttle`, `Context Shuttle`) resolve in the same
+  round trip and report `resolved_from`, so an imperfectly-spelled key finds
+  what it meant.
+- **Nothing is discarded silently.** Trimming demotes old sentences to a cold
+  tier rather than deleting them (`memory_recall`'s `include_cold` reads them
+  back); `mode: replace` retires the current sentences to that same tier
+  instead of destroying them; and the store's only deletion is past the cold
+  cap, reported on the write that caused it.
+- **A stale write is kept and flagged.** Pass the `revision` a recall returned
+  and a concurrent change is detected — the write still lands, marked
+  `backfill` (ranked below current knowledge), rather than being dropped.
+- **Keys are discovered, not guessed.** `memory_keys` lists the keyspace with
+  revisions, per-tier counts and aliases; a guessed key is exactly what a
+  keyword store punishes.
+
+`memory_forget` is the exception to the read-and-report boundary, and it is the
+only destructive operation in the tool surface. It is gated with the rest of
+the family — a model cannot call it where no store is named — and its
+description says plainly that there is no undo and that `replace` is the
+right tool when the fact is merely superseded rather than wrong.
 
 ### Email access
 

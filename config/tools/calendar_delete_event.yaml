@@ -1,7 +1,7 @@
 # Calendar event deletion.
 #
 # Registered only when a calendar has been named for writing
-# (`requires_writes`), like the other two write tools.
+# (`requires: calendar_writes`), like the other two write tools.
 #
 # Deliberately one parameter: the id carries the scope, and a separate
 # "delete the whole series" flag would be a second way to express what the id
@@ -16,7 +16,7 @@ description: >
   of an event that does not repeat is refused with a message explaining why,
   rather than deleting the whole thing. There is no undo, so check the id
   with calendar_get_event first if you are unsure which one it is.
-requires_writes: true
+requires: calendar_writes
 handler: App\Tool\Calendar\DeleteEventTool::deleteEvent
 parameters:
   id:

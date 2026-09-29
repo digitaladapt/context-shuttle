@@ -13,10 +13,13 @@ namespace App\ToolRegistry;
  * here — one place, so every surface (MCP, REST, OpenAPI, `/ready`) sees the
  * same set rather than four implementations of "is this tool available".
  *
- * It is an interface with one implementation rather than the registry knowing
- * about calendars directly, because the registry is generic and its job is to
+ * It is an interface rather than the registry knowing about calendars (or
+ * memory stores) directly, because the registry is generic and its job is to
  * hold definitions. What "available" means for a given requirement is a
- * question for whoever owns that requirement.
+ * question for whoever owns that requirement — so there is one implementation
+ * per requirement, each answering only for the token it owns, composed by
+ * {@see ChainedToolAvailability}. Adding a family is adding a gate to that
+ * list, not a branch here.
  *
  * The decision must be made **at runtime**, never at container compile time:
  * an env-backed parameter is still the literal `%env(...)%` placeholder while

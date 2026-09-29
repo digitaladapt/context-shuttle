@@ -1,0 +1,49 @@
+# Memory write — remember something under a keyword.
+#
+# `requires: memory_store` — the tool exists only when MEMORY_DRAFT_URL names
+# an instance (see memory_recall.yaml for why the family is gated as a whole).
+#
+# The description exists to stop the two ways a model gets a write wrong: it
+# is told to read first when it can (so the store can detect concurrent
+# writes), and it is told what replace costs (retirement to cold, not
+# destruction) so "replace" is not chosen as a synonym for "append".
+name: memory_remember
+description: >-
+  Store one or more facts under a keyword, for later recall by that name.
+  Sentences are split out of the text upstream, so passing prose is enough
+  ("Uses blue-green deploys. Rollback is one command."); nothing is lost
+  silently — sentences pushed out of the hot tier are demoted to cold, and
+  the result says exactly what was added, retired or purged. Keys are
+  namespaced by convention (`project:`, `person:`, `pref:`) and spelling
+  variants unify, so the store stays easy to ask. If you already recalled
+  the key, pass the revision you read: that lets a concurrent write be
+  detected (yours is still kept, flagged as backfilled, ranked below
+  current knowledge). If you did not read first, omit it. Use `replace`
+  only to retire the key's current sentences in favour of the new ones —
+  they move to cold storage and remain retrievable, but they stop being
+  what recall shows. Do not use it for appending more facts.
+requires: memory_store
+handler: App\Tool\MemoryDraft\MemoryDraftTool::remember
+parameters:
+  key:
+    type: string
+    description: 'The keyword to store under, e.g. "context-shuttle" or "pref:editor". Variant spellings resolve to the same key and are recorded as aliases.'
+    required: true
+  sentences:
+    type: string
+    description: 'The facts to store, as prose. Multiple sentences are split into separately retrievable rows, keeping abbreviations and decimals intact.'
+    required: true
+  mode:
+    type: string
+    description: 'append (default) adds to what is stored; replace retires the key''s current sentences (to cold storage — they are not destroyed) and stores these instead.'
+    required: false
+    enum: [append, replace]
+  pin:
+    type: boolean
+    description: 'Pin the sentences so trimming cannot demote them. For the few facts that must not age out; everything else is trimmed by recency.'
+    required: false
+  revision:
+    type: integer
+    description: 'The revision a memory_recall returned, when you read before writing. Omit if you did not read first.'
+    required: false
+    minimum: 1

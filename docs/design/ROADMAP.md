@@ -20,6 +20,7 @@ Decided so far, with the reasoning recorded so it does not get relitigated:
 |---|---|---|
 | **Blinko** (notes, memory) | existing MCP server | Ships `searchBlinko` / `upsertBlinko` / `createComment` / … over streamable HTTP at `/mcp` with its own API token. Includes a web search tool, so a separate `web_search` tool is deferred. |
 | **SparkyFitness** (food, fitness, water, health) | existing MCP server | "MCP server + bring your own LLM" is a first-class feature of the application. |
+| **memory-draft** (keyword memory) | native tool — **shipped** | No MCP server to register, so the choice did not arise. Five tools behind `MEMORY_DRAFT_URL`, which is the whole opt-in — the store has no auth, so naming an instance is the only boundary there is. Design: `docs/design/MEMORY.md`. |
 | **ntfy read-back** | native tool | See below — reading is wanted, touching production is not. |
 | **CardDAV contacts** | native tool | Radicale is already in use for CalDAV. See below. |
 
@@ -31,6 +32,18 @@ docker control** anywhere, and no **network-infrastructure access** — the
 Wi-Fi router (EERO) and thermostat (Honeywell) are exactly the class of
 device where a wrong call takes out the connection everything else depends
 on, including the ability to notice and undo it.
+
+**Amended for the memory family (2026-09):** the boundary is about services
+this deployment *operates*, and memory-draft is not one of them — it is a
+store these tools own the contents of. So writes are in scope here
+(`memory_remember`), for the same reason `calendar_create_event` is: the data
+is ours, the blast radius is our own store, and the alternative is a
+deployment that can read its own history but never add to it. One operation
+remains apart: `memory_forget` destroys, has no undo, and exists only because
+a fact being *wrong* (a stale credential, a superseded decision) needs an
+answer that `replace` cannot give — the store's own design keeps everything
+else recoverable, and the tool's description says which of the two situations
+it is for.
 
 ## Near term
 

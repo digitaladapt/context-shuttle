@@ -157,12 +157,12 @@ final class ToolLoader
             $validated[$paramName] = $def;
         }
 
-        $requiresWrites = false;
-        if (\array_key_exists('requires_writes', $raw)) {
-            if (!\is_bool($raw['requires_writes'])) {
-                throw new ToolDefinitionException("Tool file {$relative}: 'requires_writes' must be a boolean.");
+        $requires = null;
+        if (\array_key_exists('requires', $raw)) {
+            if (!\is_string($raw['requires']) || !preg_match('/^[a-z][a-z0-9_]{0,63}$/', $raw['requires'])) {
+                throw new ToolDefinitionException("Tool file {$relative}: 'requires' must be a lowercase snake_case requirement name (max 64 chars).");
             }
-            $requiresWrites = $raw['requires_writes'];
+            $requires = $raw['requires'];
         }
 
         $defaultLocation = null;
@@ -188,7 +188,7 @@ final class ToolLoader
             handler: $handler,
             parameters: $validatedParams,
             defaultLocation: $defaultLocation,
-            requiresWrites: $requiresWrites,
+            requires: $requires,
         );
     }
 
