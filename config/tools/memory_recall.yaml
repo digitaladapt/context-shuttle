@@ -10,15 +10,20 @@
 # so several keywords cost one round trip.
 name: memory_recall
 description: >-
-  Look up what is remembered about one or more keywords, by name. Each
-  keyword resolves independently, so a batch returns hits and misses
-  separately and one miss does not spoil the others. A miss is a normal
-  answer, not an error: it arrives with suggestions of nearby keys that
-  are stored, so a keyword that is spelled differently can be found in the
-  same round trip (ContextShuttle, context-shuttle and context_shuttle are
-  all one key). Every hit carries its revision — when you intend to write,
-  pass that revision back to memory_remember so a concurrent change is
-  detected rather than overwritten. Results are ordered newest first.
+  Look up what is remembered about one or more keywords, by name. The
+  keyword alone is enough — no extra arguments are needed to get the
+  important facts. Each keyword resolves independently, so a batch returns
+  hits and misses separately and one miss does not spoil the others. A
+  miss is a normal answer, not an error: it arrives with suggestions of
+  nearby keys that are stored, so a keyword that is spelled differently
+  can be found in the same round trip (ContextShuttle, context-shuttle and
+  context_shuttle are all one key). Pinned sentences — the facts the store
+  was told to keep — are always returned in full whatever `depth` is set
+  to, and each hit reports how many it holds, so a key whose durable facts
+  outnumber `depth` still answers completely. Every hit carries its
+  revision — when you intend to write, pass that revision back to
+  memory_remember so a concurrent change is detected rather than
+  overwritten. Results are ordered newest first.
 requires: memory_store
 handler: App\Tool\MemoryDraft\MemoryDraftTool::recall
 parameters:
@@ -30,7 +35,7 @@ parameters:
       type: string
   depth:
     type: integer
-    description: 'Sentences to return per keyword, newest first (default: 2). Raise it when you expect several facts under one key.'
+    description: 'How many unpinned sentences to return per keyword, newest first. Pinned sentences are always returned in addition to these, so this only needs raising when a key has several unpinned facts — a keyword that needed an extra argument before it was useful would be a bug in this tool, not in your call.'
     required: false
     minimum: 1
   include_cold:

@@ -6,6 +6,20 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Memory: the `memory_*` tools now describe what a small model actually
+  needs to know to get a useful answer in one call.** `memory_recall`'s
+  `depth` parameter documented a hard-coded `(default: 2)` that the store no
+  longer used, so the one number a caller could see disagreed with the one
+  that applied; the tool no longer restates a default the store owns. The
+  description now says that pinned sentences are always returned in full
+  whatever `depth` is set to, and that `pinned` is reported per hit, so a
+  keyword whose durable facts outnumber `depth` no longer looks like a
+  keyword with very little in it. `memory_keys` now says it reports a pinned
+  count per key, which is the answer to "which of these has facts worth
+  asking for?".
+
 ### Fixed
 
 - **Email: folder matching now ignores case and treats `.` and `/` as the

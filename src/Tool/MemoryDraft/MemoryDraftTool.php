@@ -70,8 +70,14 @@ final class MemoryDraftTool
      * service, and a tool that turned "I do not know X" into a failure would
      * throw them away.
      *
+     * `depth` is omitted when the caller does not give one, so the store's own
+     * default applies. Pinned sentences are returned in full regardless of that
+     * default: a model that asks for a keyword by name gets the durable facts
+     * about it without having to know to raise a number first.
+     *
      * @param list<string> $keys  keywords to look up, at least one
-     * @param int|null     $depth sentences per key, at least 1 (memory-draft's default: 2)
+     * @param int|null     $depth unpinned sentences per key, at least 1;
+     *                            omitted to use the store's default
      *
      * @return array<string, mixed> the service's own `{hits, misses}` payload
      */
