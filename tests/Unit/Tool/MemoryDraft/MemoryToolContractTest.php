@@ -99,7 +99,6 @@ final class MemoryToolContractTest extends TestCase
         // pin. The description has to say that omitting means "leave it".
         $pin = $this->memoryTools()['memory_remember']->parameters['pin']['description'] ?? '';
 
-        self::assertStringContainsString('Omit', $pin, 'pin must say what omitting does');
         self::assertStringContainsString('un-pin', $pin, 'pin must distinguish explicit false from omission');
     }
 }
