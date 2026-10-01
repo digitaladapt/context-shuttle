@@ -40,7 +40,7 @@ parameters:
     enum: [append, replace]
   pin:
     type: boolean
-    description: 'Pin the sentences so trimming cannot demote them. For the few facts that must not age out; everything else is trimmed by recency.'
+    description: 'Pin the sentences so trimming cannot demote them. For the few facts that must not age out; everything else is trimmed by recency. Pass false to un-pin, pass true to pin.'
     required: false
   revision:
     type: integer
