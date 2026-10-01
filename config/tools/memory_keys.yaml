@@ -4,13 +4,17 @@
 name: memory_keys
 description: >-
   List the keywords this memory holds, with each one's revision, sentence
-  counts per tier (hot, cold, backfilled), recorded aliases and how long
-  ago it was written. Call this before asking for something by name: a
-  keyword store punishes a guessed key with a miss, which looks exactly
-  like "nothing is known". The revision is the value to pass back to
-  memory_remember when writing against what you just read. Results are
-  ordered by most recently written, so what the store has been thinking
-  about is at the top.
+  counts per tier (hot, cold, backfilled), how many of its sentences are
+  pinned, recorded aliases and how long ago it was written. Call this
+  before asking for something by name: a keyword store punishes a guessed
+  key with a miss, which looks exactly like "nothing is known". The pinned
+  count explains a key whose hot count is higher than the store's hot
+  budget: pinned sentences are exempt from trimming, and they are always
+  returned by memory_recall, so a key with a high pinned count is one you
+  can ask about by name and get everything important back. The revision is
+  the value to pass back to memory_remember when writing against what you
+  just read. Results are ordered by most recently written, so what the
+  store has been thinking about is at the top.
 requires: memory_store
 handler: App\Tool\MemoryDraft\MemoryDraftTool::keys
 parameters:
