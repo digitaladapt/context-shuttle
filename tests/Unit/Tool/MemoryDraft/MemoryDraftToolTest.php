@@ -183,11 +183,31 @@ final class MemoryDraftToolTest extends TestCase
     {
         // Append-and-unpinned is the store's default; sending `mode: append`
         // explicitly would be the tool re-deciding something it does not own.
+        //
+        // Omitting `pin` is load-bearing beyond brevity: memory-draft reads an
+        // absent pin as "no instruction", so it leaves an existing pin alone.
+        // If this tool ever started sending a default, re-stating a fact would
+        // silently un-pin it.
         $this->client()->queue(['{"results":[{"key":"a"}],"purged":[]}']);
 
         $this->tool()->remember('a', 'text');
 
         self::assertSame(['items' => [['key' => 'a', 'sentences' => 'text']]], $this->body());
+        self::assertArrayNotHasKey('pin', $this->body()['items'][0]);
+    }
+
+    public function test_remember_forwards_an_explicit_false_pin_so_it_can_unpin(): void
+    {
+        // `false` must survive the passthrough. A truthiness check here would
+        // drop it and make un-pinning impossible through the tool — the one
+        // way to take a pin back without destroying the key with `forget`.
+        $this->client()->queue(['{"results":[{"key":"a"}],"purged":[]}']);
+
+        $this->tool()->remember('a', 'text', null, false);
+
+        $item = $this->body()['items'][0];
+        self::assertArrayHasKey('pin', $item);
+        self::assertFalse($item['pin'], 'an explicit false pin means "un-pin", not "unspecified"');
     }
 
     public function test_remember_rejects_empty_sentences_before_calling_the_service(): void

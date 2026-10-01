@@ -22,6 +22,15 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Memory: re-stating a fact no longer un-pins it.** The tool already sent
+  `pin` only when the model set it — which is the safe behaviour — but the
+  parameter description mentioned only what `true` did, so a caller with no
+  opinion about pinning either passed `false` or read its own silence as an
+  un-pin, and both stripped the pin off a durable fact. The description now
+  says that omitting `pin` leaves any existing pin exactly as it is, and that
+  `false` is the deliberate un-pin, so the safe choice is also the documented
+  one. `MemoryDraftTool::remember`'s docblock says the same, and both are now
+  asserted by tests so the wording cannot drift back.
 - **Email: folder matching now ignores case and treats `.` and `/` as the
   same separator, so an imperfectly-spelled real folder still matches.**
   Folder identity is a single canonical key (`FolderIdentity`): decode the

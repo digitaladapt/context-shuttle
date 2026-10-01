@@ -126,8 +126,13 @@ final class MemoryDraftTool
      *                               `replace` retires the key's current
      *                               sentences — they are kept in cold
      *                               storage, not destroyed
-     * @param bool|null   $pin       exempt from trimming; for facts
-     *                               that must not age out
+     * @param bool|null   $pin       `true` pins these sentences so trimming
+     *                               cannot demote them; `false` un-pins them;
+     *                               omit to leave any existing pin exactly as
+     *                               it is. Omitting is not "un-pin": this
+     *                               value is forwarded only when you set it,
+     *                               and re-stating a fact therefore never
+     *                               un-pins it.
      * @param int|null    $revision  the revision a recall returned, when
      *                               you read before writing. Passing it
      *                               lets memory-draft detect a concurrent

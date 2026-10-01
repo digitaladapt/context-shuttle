@@ -89,4 +89,17 @@ final class MemoryToolContractTest extends TestCase
 
         self::assertStringContainsString('trimming', $pin, 'pin must say what it protects against');
     }
+
+    public function test_remember_says_omitting_pin_leaves_it_alone(): void
+    {
+        // The distinction a small model will otherwise get wrong by default:
+        // it re-states a fact, has no opinion about `pin`, and — reading the
+        // old text, which mentioned only what `true` does — either passes
+        // `false` or assumes silence is an un-pin. Both silently strip the
+        // pin. The description has to say that omitting means "leave it".
+        $pin = $this->memoryTools()['memory_remember']->parameters['pin']['description'] ?? '';
+
+        self::assertStringContainsString('Omit', $pin, 'pin must say what omitting does');
+        self::assertStringContainsString('un-pin', $pin, 'pin must distinguish explicit false from omission');
+    }
 }
