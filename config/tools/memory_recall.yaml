@@ -35,7 +35,7 @@ parameters:
       type: string
   depth:
     type: integer
-    description: 'How many unpinned sentences to return per keyword, newest first. Pinned sentences are always returned in addition to these, so this only needs raising when a key has several unpinned facts — a keyword that needed an extra argument before it was useful would be a bug in this tool, not in your call.'
+    description: 'Sentences to return per keyword, newest first. Additionally we include all pinned sentences.'
     required: false
     minimum: 1
   include_cold:
