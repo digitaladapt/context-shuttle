@@ -204,7 +204,19 @@ curl -X POST http://127.0.0.1:8000/tools/memory_remember \
 
 curl -X POST http://127.0.0.1:8000/tools/memory_recall \
   -H 'Content-Type: application/json' -d '{"keys":["deploy"]}'
+
+# Or open a session: no key names needed.
+curl -X POST http://127.0.0.1:8000/tools/memory_recall \
+  -H 'Content-Type: application/json' -d '{"latest":true}'
 ```
+
+The second call is the one to reach for when you do not yet know what to ask
+about. It returns the keys written most recently — a few sentences each — and
+**the first line of the response says what was shown** and whether that number
+was yours or the store's. Read that line: a default treated as a deliberate
+recall is the mistake this is shaped to prevent. `keys` and `latest: true`
+compose, so `{"keys":["soul"],"latest":true}` answers "the durable facts, plus
+whatever happened since" in one call.
 
 **`MEMORY_DRAFT_URL` empty means there is no memory tool surface at all.** The
 family does not appear in `tools/list`, so a model cannot recall, write to, or

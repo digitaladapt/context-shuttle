@@ -6,6 +6,39 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Memory: `memory_recall` can now answer "what was written recently?" — the
+  question a session opens with.** `keys` is no longer required, and
+  `{"latest": true}` with no keys returns the keys written most recently, a few
+  sentences each. This is the only recall possible before the model knows any
+  keyword names, and until now the tool offered no way to start: the caller had
+  to either guess a key or call `memory_keys` and pick from a list it had no
+  basis to rank. `keys` and `latest` compose in one call
+  (`{"keys":["soul"],"latest":true}` — the durable facts plus whatever
+  happened since), and a key that is both named and recent comes back once, as
+  the named hit.
+
+  `latest` is forwarded as the **boolean `true`**, never a count: the store
+  chooses the number, so the model is never asked to pick a default it cannot
+  judge, and the default can be retuned in memory-draft without a release here.
+  The response is passed through whole, including the `latest` block whose
+  `note` states how many keys were shown and whether that number was the
+  caller's or the store's — the mistake a recency read invites is a default
+  mistaken for a deliberate recall, so the answer says which it got. Recency
+  hits carry `"match": "recent"` rather than a match kind, since nothing was
+  named.
+
+  The description warns that one scheduled key (a summary written every few
+  hours) is always the newest thing in the store, so a caller should read them
+  all rather than assuming the first is the important one.
+
+  A recall with **no keys and no `latest`** is still refused before the request,
+  as before — that combination asks for nothing, and the store answers it with a
+  422. Verified against a real memory-draft instance by two new `--group live`
+  tests, which is the only place the two repositories' agreement on this shape
+  can be checked.
+
 ### Changed
 
 - **Memory: the `memory_*` tools now describe what a small model actually

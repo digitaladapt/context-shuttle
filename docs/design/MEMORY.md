@@ -57,6 +57,50 @@ write it. A per-tool toggle here would be a boundary that does not exist,
 which is worse than an honest one-variable opt-in, because it would invite an
 operator to believe the restrictive setting meant something.
 
+## Recency: `latest`
+
+`memory_recall` answers two different questions, and the second is the one a
+session opens with:
+
+| Call | Question |
+|---|---|
+| `{"keys": ["deploy"]}` | What do I know about `deploy`? |
+| `{"latest": true}` | What was written most recently? |
+
+The second needs no key names, which is the whole point: a model at the start of
+a session knows none, so every *named* recall it could make is a guess — and
+`memory_keys` hands it an unranked list to choose from, which is the selection
+decision small models make worst. Recency is already in the store, so this costs
+no new state.
+
+The two compose in one round trip, and **that is the shape a session opening
+wants**: the durable facts by name, plus whatever was written since.
+`{"keys": ["soul"], "latest": true}` sends two entries to memory-draft and gets
+back the named hit first, then the recent ones, with the named key appearing
+once.
+
+**`latest` is forwarded as the boolean `true`, never as a count.** `true` means
+"the count is the store's to choose", so memory-draft owns that default and this
+tool never hardcodes one — the model is never asked to pick a number it has no
+basis to judge, and the default can be retuned upstream without a release here.
+A default chosen in this repo would not survive memory-draft ever offering its
+own MCP server; this shape would.
+
+The response is passed through whole, including the `latest` block whose `note`
+says how many keys were shown and whether that number was the caller's or the
+store's. That note is not decoration. The failure mode a recency read invites is
+a *default* mistaken for a deliberate, considered recall, so the first line of
+the answer exists to prevent exactly that. Recency hits also carry
+`"match": "recent"` rather than a match kind — nothing was named, so nothing
+matched, and reporting `exact` would tell the caller it had asked for that key.
+
+One judgement shaped the parameter description and is worth knowing: a key
+written on a schedule (`email-summary`, every few hours) is *always* the newest
+thing in the store and will always be among the first hits. A model that reads
+the top line, sees a summary, and concludes "nothing important is recent" has
+been failed by the tool rather than by the store. So the description says to read
+them all rather than assume the first is the important one.
+
 ## What is passed through, and what is decided here
 
 The tool is a transport, not a second implementation. These four behaviours
@@ -87,12 +131,15 @@ answered:
 Two things the tool *does* decide, because they are transport concerns rather
 than store policy:
 
-1. **A write with nothing to store, and a delete with no key, are refused
-   before the request.** Upstream, both are 200s that read like success:
-   `remember` with blank sentences answers `empty: true` (visible in the
-   detail, missable in the shape), and `forget` of an absent key is a 404
-   whose body is the real answer. Refusing locally means "stored" always
-   means stored.
+1. **A write with nothing to store, a delete with no key, and a recall that asks
+   for nothing are all refused before the request.** Upstream, the first two are
+   200s that read like success: `remember` with blank sentences answers
+   `empty: true` (visible in the detail, missable in the shape), and `forget` of
+   an absent key is a 404 whose body is the real answer. Refusing locally means
+   "stored" always means stored. The recall case is the same policy turned on
+   the newest argument: an empty `keys` is *deliberate* when `latest` is set —
+   that is how a session gets opened — so what is refused is the combination
+   that asks for nothing, not the empty list on its own.
 2. **A 404 on an API path names the variable.** A URL that answers but not
    with this API is a configuration mistake, not an empty result. The one
    exception is `forget`, where "nothing matched" is a legitimate answer and
@@ -155,4 +202,6 @@ implementation arriving, not a redesign.
   `--group live`, skipped unless `MEMORY_DRAFT_LIVE_URL` is set. This is the
   counterweight to the recorded tests: it caught that the store reports
   `intent: backfill` (not `backfilled`, which is the *sentence* flag) during
-  development.
+  development, and it is the only place that can catch the two repositories
+  disagreeing about the **recency** shape — the tool sends `{"latest": true}`
+  and asserts the note comes back, which no recorded fixture can prove.

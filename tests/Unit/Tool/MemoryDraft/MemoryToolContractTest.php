@@ -90,6 +90,59 @@ final class MemoryToolContractTest extends TestCase
         self::assertStringContainsString('trimming', $pin, 'pin must say what it protects against');
     }
 
+    public function test_recall_says_latest_is_the_way_to_open_a_session(): void
+    {
+        // The claim a small model has to be able to act on: before it knows any
+        // keyword name, `latest` is the only useful recall, and it needs no
+        // keywords. Without this sentence the tool offers no way to start.
+        $description = $this->memoryTools()['memory_recall']->description;
+
+        self::assertStringContainsString('latest', $description);
+        self::assertStringContainsString('open a session', $description);
+    }
+
+    public function test_recall_latest_says_the_response_states_what_was_shown(): void
+    {
+        // The failure mode the store designs against: a default count mistaken
+        // for a deliberate recall. The model has to know the first line tells it
+        // which one it got, or it will read arbitrary recent keys as its own
+        // considered choice.
+        $description = $this->memoryTools()['memory_recall']->description;
+
+        self::assertStringContainsString('what was shown', $description);
+    }
+
+    public function test_recall_latest_warns_that_one_key_may_be_much_more_recent(): void
+    {
+        // A summary key written every few hours is always the newest thing in
+        // the store. A model that reads only the first hit and stops will
+        // consistently miss the conversation it was actually looking for.
+        $latest = $this->memoryTools()['memory_recall']->parameters['latest']['description'] ?? '';
+
+        self::assertStringContainsString('more recent than the rest', $latest);
+    }
+
+    public function test_recall_keys_is_optional_but_says_when_it_is_needed(): void
+    {
+        // Optional because `latest` alone is a complete request — but the
+        // description still has to say what happens when neither is given, or
+        // "optional" reads as "omit this and get everything", which is the
+        // silent default the store spends its design budget avoiding.
+        $keys = $this->memoryTools()['memory_recall']->parameters['keys'];
+
+        self::assertFalse($keys['required']);
+        self::assertStringContainsString('Required unless', $keys['description']);
+    }
+
+    public function test_recall_latest_does_not_restate_a_count(): void
+    {
+        // Same rule as `depth`: the store owns the number, and a second copy of
+        // it here is a copy that will eventually disagree with the first.
+        $latest = $this->memoryTools()['memory_recall']->parameters['latest']['description'] ?? '';
+
+        self::assertDoesNotMatchRegularExpression('/\b8\b/', $latest, 'the store owns the default count');
+    }
+
     public function test_remember_says_omitting_pin_leaves_it_alone(): void
     {
         // The distinction a small model will otherwise get wrong by default:
