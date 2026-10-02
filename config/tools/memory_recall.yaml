@@ -5,9 +5,10 @@
 # permissions to gate on, so naming an instance is the whole opt-in. With
 # MEMORY_DRAFT_URL unset the family is absent from tools/list entirely.
 #
-# The description leads on the two things a model must know to use this
-# well: a miss is a normal answer (with suggestions), and recall is a batch
-# so several keywords cost one round trip.
+# The description leads on the three things a model must know to use this
+# well: a miss is a normal answer (with suggestions), recall is a batch so
+# several keywords cost one round trip, and `latest` is the way to open a
+# session when no keyword is known yet.
 name: memory_recall
 description: >-
   Look up what is remembered about one or more keywords, by name. The
@@ -17,20 +18,24 @@ description: >-
   miss is a normal answer, not an error: it arrives with suggestions of
   nearby keys that are stored, so a keyword that is spelled differently
   can be found in the same round trip (ContextShuttle, context-shuttle and
-  context_shuttle are all one key). Pinned sentences — the facts the store
-  was told to keep — are always returned in full whatever `depth` is set
-  to, and each hit reports how many it holds, so a key whose durable facts
-  outnumber `depth` still answers completely. Every hit carries its
-  revision — when you intend to write, pass that revision back to
-  memory_remember so a concurrent change is detected rather than
-  overwritten. Results are ordered newest first.
+  context_shuttle are all one key). With no keywords, set `latest: true`
+  instead and you get the keys written most recently, few sentences each —
+  use that to open a session, when you do not yet know any keyword names,
+  and the first line of the response says what was shown. Keys and
+  `latest: true` together are allowed, and the named keywords come first.
+  Pinned sentences — the facts the store was told to keep — are always
+  returned in full whatever `depth` is set to, and each hit reports how
+  many it holds, so a key whose durable facts outnumber `depth` still
+  answers completely. Every hit carries its revision — when you intend to
+  write, pass that revision back to memory_remember so a concurrent change
+  is detected rather than overwritten. Results are ordered newest first.
 requires: memory_store
 handler: App\Tool\MemoryDraft\MemoryDraftTool::recall
 parameters:
   keys:
     type: array
-    description: 'Keywords to look up, e.g. ["context-shuttle", "deploy"]. At least one. Spellings are resolved, so near misses still find a stored key.'
-    required: true
+    description: 'Keywords to look up, e.g. ["context-shuttle", "deploy"]. Spellings are resolved, so near misses still find a stored key. Required unless `latest` is true, since a recall with no keywords and no `latest` asks for nothing.'
+    required: false
     items:
       type: string
   depth:
@@ -41,4 +46,8 @@ parameters:
   include_cold:
     type: boolean
     description: 'Include demoted (cold) sentences. Trimming moves old sentences to cold rather than deleting them, so this is for "nothing recent, what about older?" — use it before concluding a key only says what it says.'
+    required: false
+  latest:
+    type: boolean
+    description: 'Also include the keys written most recently, with their newest sentences. Set this with no `keys` to open a session: it is the only recall possible before you know any keyword names. One key may be far more recent than the rest (a summary written every few hours), so read them all rather than assuming the first is the important one. The response says how many keys were shown and whether that number was the store''s choice or yours.'
     required: false

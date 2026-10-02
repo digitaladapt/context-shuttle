@@ -148,10 +148,55 @@ final class MemoryDraftLiveTest extends TestCase
         self::assertArrayHasKey('revision', $result['keys'][0]);
     }
 
+    /**
+     * The recency read, against the real service.
+     *
+     * This is the one assertion no amount of mocked HTTP can make: that the
+     * shape the tool *sends* (`{"latest": true}`) is one memory-draft actually
+     * accepts, and that the `latest` block it answers with carries the note the
+     * tool's description promises. The two repos are versioned separately, so
+     * this is where a drift between them would show up first.
+     */
+    public function test_the_recency_read_works_against_the_real_service(): void
+    {
+        $this->tool()->remember(self::KEY, 'The live test wrote this sentence.');
+
+        // No keys at all — the shape a model uses to open a session.
+        $result = $this->tool()->recall([], latest: true);
+
+        self::assertNotEmpty($result['hits'], 'a store with a key written a moment ago must answer');
+        self::assertContains(self::KEY, array_column($result['hits'], 'key'), 'the key just written is among the recent ones');
+
+        // Nothing was named, so nothing matched: claiming a match kind would
+        // tell the caller it had asked for this key.
+        self::assertSame('recent', $result['hits'][0]['match']);
+        self::assertArrayNotHasKey('resolved_from', $result['hits'][0]);
+
+        // The answer states what it did, in words, so a default count cannot be
+        // mistaken for a deliberate recall.
+        self::assertArrayHasKey('latest', $result);
+        self::assertStringContainsString('most recently written', $result['latest']['note']);
+        self::assertArrayHasKey('count', $result['latest']);
+        self::assertArrayHasKey('last_written', $result['hits'][0]);
+    }
+
+    public function test_keys_and_latest_compose_against_the_real_service(): void
+    {
+        $this->tool()->remember(self::KEY, 'Named and recent.');
+
+        $result = $this->tool()->recall([self::KEY], latest: true);
+
+        // The named hit leads, and the key is not repeated by the expansion.
+        self::assertSame(self::KEY, $result['hits'][0]['key']);
+        self::assertSame('exact', $result['hits'][0]['match']);
+
+        $occurrences = array_filter($result['hits'], static fn (array $h): bool => self::KEY === $h['key']);
+        self::assertCount(1, $occurrences, 'a key answered by name must not be added back by recency');
+    }
+
     public function test_stats_reports_the_trimming_budgets(): void
     {
         $stats = $this->tool()->stats();
-
         self::assertArrayHasKey('keys', $stats);
         self::assertArrayHasKey('caps', $stats);
         self::assertArrayHasKey('hot_per_key', $stats['caps']);

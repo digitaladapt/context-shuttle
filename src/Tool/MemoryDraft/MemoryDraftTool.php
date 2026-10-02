@@ -61,7 +61,7 @@ final class MemoryDraftTool
     }
 
     /**
-     * Look up one or more keywords.
+     * Look up one or more keywords — or ask what was written recently.
      *
      * The batch is sent as one request: memory-draft resolves each keyword
      * independently, so one miss does not spoil the batch, and the response
@@ -75,17 +75,35 @@ final class MemoryDraftTool
      * default: a model that asks for a keyword by name gets the durable facts
      * about it without having to know to raise a number first.
      *
-     * @param list<string> $keys  keywords to look up, at least one
-     * @param int|null     $depth unpinned sentences per key, at least 1;
-     *                            omitted to use the store's default
+     * **With `$latest` set and no keys, this asks the other question** — *what
+     * was written most recently?* — which is the only recall a caller can make
+     * before it knows any key names, and therefore the useful way to open a
+     * session. `latest` is forwarded as the **boolean `true`**, never a number:
+     * `true` means "the count is yours to choose", so the store owns that
+     * default and this tool never hardcodes one. The answer says so in its first
+     * line, because a default mistaken for a deliberate recall is the failure
+     * mode here.
      *
-     * @return array<string, mixed> the service's own `{hits, misses}` payload
+     * Keys and `latest` compose: naming a key *and* asking for recency is one
+     * request, and the named hits lead. A key that is both named and recent is
+     * returned once, as the named hit.
+     *
+     * @param list<string> $keys   keywords to look up. May be empty **only**
+     *                             when `$latest` is set — an empty recall is a
+     *                             caller bug, and the store refuses one
+     * @param int|null     $depth  unpinned sentences per key, at least 1;
+     *                             omitted to use the store's default
+     * @param bool|null    $latest also show the most recently written keys; on
+     *                             its own it needs no keys at all
+     *
+     * @return array<string, mixed> the service's own `{hits, misses}` payload,
+     *                              carrying a `latest` block when recency was asked for
      */
-    public function recall(array $keys, ?int $depth = null, ?bool $include_cold = null): array
+    public function recall(array $keys, ?int $depth = null, ?bool $include_cold = null, ?bool $latest = null): array
     {
         $queries = [];
 
-        foreach ($this->normalizeKeys($keys, 'keys') as $key) {
+        foreach ($this->normalizeKeys($keys, 'keys', allowEmpty: true) as $key) {
             $query = ['key' => $key];
 
             if (null !== $depth) {
@@ -97,6 +115,22 @@ final class MemoryDraftTool
             }
 
             $queries[] = $query;
+        }
+
+        // `true` rather than a count, deliberately. The tool has one dial for
+        // this and it is a boolean, so the model never chooses a number it has
+        // no basis to judge — and the store's default can change without a
+        // release here.
+        if (true === $latest) {
+            $queries[] = ['latest' => true];
+        }
+
+        if ([] === $queries) {
+            // The two ways to ask nothing. Refused here rather than sent, for
+            // the same reason a blank key is: the store answers an empty batch
+            // with a 422, and "no keys and no recency request" is a caller
+            // mistake whose fix is a one-line change at the call site.
+            throw new InvalidArgumentException('recall needs at least one key, or latest: true to ask what was written most recently. Use memory_keys to see what is stored.');
         }
 
         $payload = $this->request('POST', '/api/recall', ['queries' => $queries]);
@@ -432,11 +466,16 @@ final class MemoryDraftTool
      * non-string here means the tool was called around the pipeline, and
      * coercing it would hide that.
      *
+     * `$allowEmpty` exists for `recall` alone, where an empty list is legitimate
+     * provided recency was asked for instead. The emptiness rule is enforced by
+     * the caller, on the *request* rather than on this list, because "no keys"
+     * is only a mistake when it is the whole request.
+     *
      * @param array<mixed> $keys
      *
      * @return list<string>
      */
-    private function normalizeKeys(array $keys, string $field): array
+    private function normalizeKeys(array $keys, string $field, bool $allowEmpty = false): array
     {
         $normalized = [];
 
@@ -448,7 +487,7 @@ final class MemoryDraftTool
             $normalized[] = $this->validateKey($key, $field);
         }
 
-        if ([] === $normalized) {
+        if ([] === $normalized && !$allowEmpty) {
             throw new InvalidArgumentException(\sprintf('%s must contain at least one key.', $field));
         }
 

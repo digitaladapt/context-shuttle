@@ -57,6 +57,80 @@ final class MemoryDraftToolTest extends TestCase
 
     // ── recall ──────────────────────────────────────────────────────────
 
+    public function test_recall_empty_batch_is_an_error_about_asking_nothing(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('latest: true');
+
+        $this->tool()->recall([]);
+    }
+
+    /**
+     * The boolean is forwarded as `true`, never as a count.
+     *
+     * That is the whole point of the shape: `true` means "the count is the
+     * store's to choose", so its default can be retuned in memory-draft without
+     * a release here, and the model is never asked to pick a number it has no
+     * basis to judge. An integer reaching this point would quietly undo both.
+     */
+    public function test_recall_latest_is_forwarded_as_the_boolean_not_a_count(): void
+    {
+        $this->client()->queue(['{"hits":[],"misses":[],"latest":{"note":"No keys given","count":8}}']);
+
+        $this->tool()->recall([], null, null, true);
+
+        self::assertSame(['queries' => [['latest' => true]]], $this->body());
+    }
+
+    public function test_recall_no_keys_with_latest_is_a_complete_request(): void
+    {
+        $this->client()->queue(['{"hits":[{"key":"chat","match":"recent","entries":[]}],"misses":[],"latest":{"note":"No keys given"}}']);
+
+        $result = $this->tool()->recall([], null, null, true);
+
+        // Not an error path: this is the ordinary way to open a session, and the
+        // response is passed through whole so the `latest` block — the note
+        // saying what was shown — reaches the caller.
+        self::assertSame('chat', $result['hits'][0]['key']);
+        self::assertArrayHasKey('latest', $result);
+    }
+
+    public function test_recall_keys_and_latest_compose_into_one_request(): void
+    {
+        $this->client()->queue(['{"hits":[],"misses":[],"latest":{}}']);
+
+        $this->tool()->recall(['soul'], null, null, true);
+
+        self::assertSame(
+            ['queries' => [['key' => 'soul'], ['latest' => true]]],
+            $this->body(),
+            'named first, then the recency entry — one round trip, not two calls',
+        );
+    }
+
+    public function test_recall_latest_false_is_not_forwarded(): void
+    {
+        // `false` is the caller saying "an ordinary recall". Forwarding it would
+        // add an entry that asks for nothing, and the store reads any non-false
+        // `latest` as the recency request.
+        $this->client()->queue(['{"hits":[],"misses":[]}']);
+
+        $this->tool()->recall(['a'], null, null, false);
+
+        self::assertSame(['queries' => [['key' => 'a']]], $this->body());
+    }
+
+    public function test_recall_still_rejects_a_blank_key_when_latest_is_also_set(): void
+    {
+        // `latest` relaxes the "at least one key" rule, not the "every key must
+        // be a real key" one. A blank entry beside a legitimate recency request
+        // is still a typo.
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('must not be empty');
+
+        $this->tool()->recall(['   '], null, null, true);
+    }
+
     public function test_recall_posts_the_queries_batch_and_returns_hits_and_misses(): void
     {
         $this->client()->queue(['{"hits":[{"key":"context-shuttle","match":"exact","revision":3,"entries":[{"text":"A gateway."}]}],"misses":[{"key":"nope","suggestions":["note"]}]}']);
@@ -112,14 +186,6 @@ final class MemoryDraftToolTest extends TestCase
         $this->tool()->recall(['  ContextShuttle  ']);
 
         self::assertSame(['queries' => [['key' => 'ContextShuttle']]], $this->body());
-    }
-
-    public function test_recall_rejects_an_empty_batch_before_calling_the_service(): void
-    {
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('at least one key');
-
-        $this->tool()->recall([]);
     }
 
     public function test_recall_rejects_a_blank_key(): void
