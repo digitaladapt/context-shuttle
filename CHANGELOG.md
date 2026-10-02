@@ -55,6 +55,11 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The penny-track create tool sent its headers as a corrupted string** —
+  caught by its own test before the tool had ever been exercised. The header
+  map was merged with `.` where `+` was meant, so the array was stringified
+  into `"Array"` on the way to the HTTP client. Only the create path was
+  affected; the read path assembled its headers correctly.
 - **Memory: re-stating a fact no longer un-pins it.** The tool already sent
   `pin` only when the model set it — which is the safe behaviour — but the
   parameter description mentioned only what `true` did, so a caller with no
@@ -94,6 +99,64 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
   path is what let the casing bug pass the suite.
 
 ### Added
+
+- **`create_transaction` tool — log a spending transaction in penny-track.**
+  For a receipt that has already happened, most obviously one that arrived by
+  email: a model reads "thank you for your payment of $2.13" and records it,
+  instead of a human retyping it a week later.
+
+  **`PENNYTRACK_WRITE_API_KEY` empty means the tool does not exist.** It is
+  absent from `tools/list` rather than listed and refusing, so a deployment
+  configured for reading has no mutation verb for a model to find — the same
+  rule the calendar writes and the memory family follow, and the one an
+  operator can check by looking rather than by reading a refusal.
+
+  A second variable rather than a boolean beside `PENNYTRACK_API_KEY`, because
+  that is penny-track's shape: both kinds of key travel in the same `X-API-Key`
+  header and penny-track stores only a hash of each, so there is no way to ask
+  whether a key may write without attempting a write. Naming a write key is the
+  only statement that carries the answer. Reads keep using
+  `PENNYTRACK_API_KEY`, where a read-only key remains the right choice.
+
+  This is the one tool here that does not pass upstream data through untouched.
+  Everywhere else that is deliberate — re-deciding a value would be a second
+  implementation that can disagree with the first — but a *write* is exactly
+  where penny-track's lack of an opinion has to be supplied by someone, since
+  nothing downstream ever will. Three safeguards, all refusals rather than
+  repairs except where a repair is provably safe:
+
+  - **The category and the business must already exist.** Capitalisation,
+    spacing and punctuation are corrected to the stored spelling (`backblaze`
+    finds `Backblaze`), and the correction is reported in the result so it is
+    never silent. Matching never drops a *word*, so `Backblaze, Inc.` is
+    refused against a stored `Backblaze` rather than folded into it — a rule
+    that dropped words would also fold `Acme Consulting` into `Acme`. The
+    refusal names the closest existing values, so recovering is one more call.
+  - **No second transaction on that day for that amount, business and
+    category.** Far wider than penny-track's own guard, which only refuses an
+    identical receipt logged within five minutes; reading the same email again
+    tomorrow would slip past that and leave a second copy of a real expense.
+    The day is bracketed explicitly as two instants, because a date-shaped
+    range would stop at midnight and miss everything logged later that day.
+  - **The duplicate check depends on the two above**, since a duplicate is only
+    recognisable if the values compared are the values already stored.
+
+  A ledger with no categories yet is the one case the checks cannot apply, and
+  refusing would make the very first transaction unloggable. The value is
+  stored as given and **reported** in the result — that is the moment a typo
+  becomes permanent, because everything logged afterwards matches against it.
+
+- **`PennyTrackClient`, `PennyTrackEndpoint` and `PennyTrackCredentials`.** The
+  read and write tools now share one place that resolves the base URL, chooses
+  the key, and turns a refused key into a message naming the variable to fix —
+  and the two paths name *different* variables, since they present different
+  keys. A refused write key says `PENNYTRACK_WRITE_API_KEY` and explains that
+  penny-track refuses a read-only key for anything that mutates the ledger,
+  which is the likeliest way to discover a key is read-only.
+
+- **`Vocabulary`** — the matcher behind the two value checks, with the fold
+  rule (case, spacing and punctuation only) as the whole reason a correction
+  can be safe: it can never merge two different names.
 
 - **Memory tools (`memory_recall`, `memory_remember`, `memory_keys`,
   `memory_stats`, `memory_forget`).** A keyword-addressed memory store, for

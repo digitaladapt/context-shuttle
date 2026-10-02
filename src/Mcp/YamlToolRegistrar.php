@@ -147,6 +147,22 @@ final class YamlToolRegistrar
                 idempotentHint: true,
                 openWorldHint: true,
             ),
+            // The create tool. readOnly is false and idempotent is false, and
+            // the second of those is the interesting one: the transaction it
+            // writes is protected by the same-day duplicate check, but that
+            // check is about the *ledger's* contents rather than about this
+            // call, so calling twice with the same arguments is a refusal the
+            // second time, not a no-op. destructive stays false — nothing a
+            // create does is unrecoverable, and a receipt can be deleted in
+            // penny-track — which is the distinction that keeps a confirmation
+            // prompt from being raised on every email the model reads.
+            'create_transaction' => new ToolAnnotations(
+                title: 'Create transaction',
+                readOnlyHint: false,
+                destructiveHint: false,
+                idempotentHint: false,
+                openWorldHint: true,
+            ),
             'get_health_logs' => new ToolAnnotations(
                 title: 'Get health logs',
                 readOnlyHint: true,
