@@ -5,6 +5,7 @@ parameters:
     env(LOG_LEVEL): 'info'
     env(PENNYTRACK_URL): ''
     env(PENNYTRACK_API_KEY): ''
+    env(PENNYTRACK_WRITE_API_KEY): ''
     env(VITALPULSE_URL): ''
     env(VITALPULSE_API_KEY): ''
     env(CALDAV_URL): ''
@@ -39,7 +40,18 @@ parameters:
     # working on deployments without penny-track; the tool fails with a
     # clear message when invoked unconfigured.
     pennytrack_url: '%env(string:default::PENNYTRACK_URL)%'
+    # The READ key. A read-only key is sufficient and is what the read tool
+    # documents. Empty does not hide `get_transactions`: a read tool that
+    # cannot answer still has an answer ("configure me"), so it stays listed.
     pennytrack_api_key: '%env(string:default::PENNYTRACK_API_KEY)%'
+    # The WRITE key, and the create tool's opt-in. Deliberately a separate
+    # name rather than a boolean beside the read key: penny-track puts both
+    # kinds of key behind the same X-API-Key header and stores only a hash,
+    # so it cannot be asked which kind a key is without attempting a write.
+    # Naming a write key is therefore the only trustworthy statement that
+    # writes are intended — and empty means `create_transaction` is not
+    # registered at all, which an operator can check by reading tools/list.
+    pennytrack_write_api_key: '%env(string:default::PENNYTRACK_WRITE_API_KEY)%'
 
     # Vital-pulse tool configuration, same pattern as penny-track above.
     vitalpulse_url: '%env(string:default::VITALPULSE_URL)%'
@@ -153,6 +165,12 @@ services:
             - '../src/Email/FolderNotAllowedException.php'
             - '../src/Email/MoveNotObserved.php'
             - '../src/Email/TagName.php'
+            # Penny-track domain value objects and refusals: plain data and
+            # exception types. Their constructors take a list of strings or
+            # throw, and neither is something the container can or should
+            # autowire — a Vocabulary built by the container would be an empty
+            # one, which is exactly the state that skips the safeguards.
+            - '../src/PennyTrack/Domain/'
 
     # ── Controllers ────────────────────────────────────────────────────
     App\Mcp\McpController:
@@ -208,11 +226,34 @@ services:
     App\Tool\Echo\EchoTool:
         public: true
 
+    # ── Penny-track ─────────────────────────────────────────────────────
+    # The endpoint and the keys are services because more than one tool needs
+    # the same answer: the read tool and the create tool both build requests
+    # against one base URL, and the gate deciding whether the create tool
+    # exists reads the same write key the tool presents. Two copies of either
+    # would be two chances for visibility and behaviour to disagree.
+    App\PennyTrack\PennyTrackEndpoint:
+        arguments:
+            $configured: '%pennytrack_url%'
+
+    App\PennyTrack\PennyTrackCredentials:
+        arguments:
+            $readKey: '%pennytrack_api_key%'
+            $writeKey: '%pennytrack_write_api_key%'
+
+    App\PennyTrack\PennyTrackClient:
+        arguments:
+            $endpoint: '@App\PennyTrack\PennyTrackEndpoint'
+            $credentials: '@App\PennyTrack\PennyTrackCredentials'
+
     App\Tool\PennyTrack\TransactionsTool:
         public: true
-        arguments:
-            $baseUrl: '%pennytrack_url%'
-            $apiKey: '%pennytrack_api_key%'
+
+    # The only tool here that writes to a ledger. Public like every other
+    # handler — the YAML dispatcher resolves it by name from the container —
+    # while its *availability* is decided by the gate below.
+    App\Tool\PennyTrack\CreateTransactionTool:
+        public: true
 
     App\Tool\VitalPulse\HealthLogsTool:
         public: true
@@ -294,12 +335,17 @@ services:
         arguments:
             $endpoint: '@App\MemoryDraft\MemoryDraftEndpoint'
 
+    App\PennyTrack\PennyTrackWriteGate:
+        arguments:
+            $credentials: '@App\PennyTrack\PennyTrackCredentials'
+
     App\ToolRegistry\ToolAvailability:
         class: App\ToolRegistry\ChainedToolAvailability
         arguments:
             $gates:
                 - '@App\Calendar\CalendarWriteGate'
                 - '@App\MemoryDraft\MemoryDraftGate'
+                - '@App\PennyTrack\PennyTrackWriteGate'
 
     App\Tool\Calendar\ListEventsTool:
         public: true

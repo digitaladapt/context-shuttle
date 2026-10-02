@@ -6,6 +6,7 @@ namespace App\Tests\Support;
 
 use Override;
 use RuntimeException;
+use Symfony\Component\HttpClient\Exception\TransportException;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
 
@@ -36,10 +37,17 @@ final class RecordingHttpClient extends MockHttpClient
     /** @var list<array{status: int, body: string}> */
     private array $queue = [];
 
+    /** A transport failure to raise instead of issuing any response. */
+    private ?string $failure = null;
+
     public function __construct()
     {
         parent::__construct(function (string $method, string $url, array $options): MockResponse {
             $this->calls[] = ['method' => $method, 'url' => $url, 'options' => $options];
+
+            if (null !== $this->failure) {
+                throw new TransportException($this->failure);
+            }
 
             $next = array_shift($this->queue);
 
@@ -61,6 +69,19 @@ final class RecordingHttpClient extends MockHttpClient
         foreach ($bodies as $body) {
             $this->queueWithStatus($body, 200);
         }
+    }
+
+    /**
+     * Make every request fail at the transport layer, the way an unreachable
+     * host does — as distinct from a response carrying an error status.
+     *
+     * This is the one failure a caller can arrive in two shapes (a thrown
+     * `TransportExceptionInterface` rather than a `ResponseInterface`), so it is
+     * the one worth having a scripted form of.
+     */
+    public function failWith(string $reason): void
+    {
+        $this->failure = $reason;
     }
 
     /**

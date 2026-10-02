@@ -1,0 +1,58 @@
+# Transaction creation.
+#
+# `requires: pennytrack_writes` means this tool is only registered when a
+# write-capable API key has been named. On a deployment configured for reading,
+# it is absent from tools/list entirely rather than listed and refusing — a
+# model cannot attempt a mutation it cannot see.
+#
+# The description leads with the three refusals because they are what a caller
+# has to get right, and it says outright that a refusal is not a failure to
+# retry blindly: two of the three are answered by changing what you pass, and
+# the third is answered by not logging anything at all.
+name: create_transaction
+description: >
+  Log one spending transaction in penny-track, for a receipt that has already
+  happened — for example one that arrived by email. Pass the amount, the date
+  it occurred, the business and the category. All four are required. The
+  business and the category must be ones the ledger already knows: spelling is
+  forgiving, so a value differing only in capitalisation, spacing or
+  punctuation resolves to the stored spelling (passing "backblaze" finds
+  "Backblaze"), but a business or category the ledger has no match for is
+  refused with the nearest existing ones named, and is never created on the
+  fly. Note that matching never drops a word, so "Backblaze, Inc." does not
+  match a stored "Backblaze" and is refused — the refusal will name
+  "Backblaze", and calling again with that value succeeds. A transaction is
+  also refused when the ledger already holds the same amount, business and
+  category on that day, which is the usual sign that the same receipt is
+  being logged twice. When a value is refused,
+  re-read the named existing values and call again with one of them; do not
+  retry with the same argument, and do not log a genuinely new merchant or
+  category here — that is a one-time job in penny-track itself, after which
+  this tool will resolve it.
+requires: pennytrack_writes
+handler: App\Tool\PennyTrack\CreateTransactionTool::createTransaction
+parameters:
+  amount:
+    type: number
+    description: 'What was spent, e.g. 2.13. Must be greater than zero and a whole number of cents; penny-track stores two decimal places.'
+    required: true
+    minimum: 0
+  date:
+    type: string
+    description: 'When it happened, YYYY-MM-DD (e.g. 2026-10-02) — the date on the receipt, not today and not the day it is being logged.'
+    required: true
+    pattern: '^\d{4}-\d{2}-\d{2}$'
+  business:
+    type: string
+    description: 'The merchant, e.g. "Backblaze". Must match a business already in the ledger; capitalisation and punctuation are corrected for you.'
+    required: true
+  category:
+    type: string
+    description: 'The category, e.g. "Software". Must match a category already in the ledger; capitalisation and punctuation are corrected for you.'
+    required: true
+  location:
+    type: string
+    description: 'Where it happened. Free text, and not checked against the ledger. Optional.'
+  notes:
+    type: string
+    description: 'Anything worth recording, such as what the receipt was for. Free text. Optional.'

@@ -4,18 +4,25 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Tool\PennyTrack;
 
+use App\PennyTrack\PennyTrackClient;
+use App\PennyTrack\PennyTrackCredentials;
+use App\PennyTrack\PennyTrackEndpoint;
+use App\Tests\Support\RecordingHttpClient;
 use App\Tool\PennyTrack\TransactionsTool;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
-use Symfony\Component\HttpClient\MockHttpClient;
-use Symfony\Component\HttpClient\Response\MockResponse;
 
 /**
- * Unit tests for the penny-track transactions tool, using a mocked HTTP
- * client so no network is needed. Exercises the tool the way a caller
- * would: valid ranges, invalid dates, bad limits, missing config,
- * auth failures, and upstream errors.
+ * Unit tests for the penny-track transactions tool, using a scripted HTTP
+ * client so no network is needed. Exercises the tool the way a caller would:
+ * valid ranges, invalid dates, bad limits, missing config, auth failures, and
+ * upstream errors.
+ *
+ * The transport itself — the URL, the key header, the error translation — now
+ * lives in `PennyTrackClient` and is tested through it, so what is asserted
+ * here is the read tool's own behaviour: the argument checks, and the query it
+ * asks the ledger for.
  *
  * @internal
  *
@@ -23,138 +30,132 @@ use Symfony\Component\HttpClient\Response\MockResponse;
  */
 final class TransactionsToolTest extends TestCase
 {
+    private function tool(RecordingHttpClient $http, string $baseUrl = 'https://penny.example.com'): TransactionsTool
+    {
+        return new TransactionsTool(new PennyTrackClient(
+            $http,
+            new PennyTrackEndpoint($baseUrl),
+            new PennyTrackCredentials('ro-key', ''),
+        ));
+    }
+
+    private function emptyPage(): string
+    {
+        return '{"data": [], "meta": {"page": 1, "limit": 10, "total": 0, "pages": 0}}';
+    }
+
     public function test_fetches_transactions_for_valid_range(): void
     {
-        $client = new MockHttpClient();
-        $calls = [];
-        $client->setResponseFactory(static function ($method, $url, $options) use (&$calls) {
-            $calls[] = ['method' => $method, 'url' => $url, 'options' => $options];
+        $http = new RecordingHttpClient();
+        $http->queue(['{"data": [{"id": 1, "amount": 12.5, "business": "Coffee Shop", "category": "Dining"}], "meta": {"page": 1, "limit": 10, "total": 1, "pages": 1}}']);
 
-            return new MockResponse(json_encode([
-                'data' => [
-                    ['id' => 1, 'amount' => 12.5, 'business' => 'Coffee Shop', 'category' => 'Dining'],
-                ],
-                'meta' => ['page' => 1, 'limit' => 10, 'total' => 1, 'pages' => 1],
-            ], \JSON_THROW_ON_ERROR));
-        });
+        $result = $this->tool($http)->getTransactions('2025-01-01', '2025-01-31');
 
-        $tool = new TransactionsTool($client, 'https://penny.example.com', 'ro-key');
-
-        $result = $tool->getTransactions('2025-01-01', '2025-01-31');
-
-        self::assertSame('GET', $calls[0]['method']);
-        self::assertSame('https://penny.example.com/api/receipts?from=2025-01-01&to=2025-01-31', $calls[0]['url']);
+        self::assertSame('GET', $http->calls[0]['method']);
+        self::assertSame('https://penny.example.com/api/receipts?from=2025-01-01&to=2025-01-31', $http->calls[0]['url']);
+        self::assertSame(['from' => '2025-01-01', 'to' => '2025-01-31'], $http->calls[0]['options']['query']);
         self::assertSame(12.5, $result['data'][0]['amount']);
         self::assertSame(1, $result['meta']['total']);
     }
 
-    public function test_sends_api_key_header(): void
+    public function test_sends_the_read_api_key_header(): void
     {
-        $client = new MockHttpClient();
-        $calls = [];
-        $client->setResponseFactory(static function ($method, $url, $options) use (&$calls) {
-            $calls[] = $options;
+        $http = new RecordingHttpClient();
+        $http->queue([$this->emptyPage()]);
 
-            return new MockResponse('{"data": [], "meta": {"page": 1, "limit": 10, "total": 0, "pages": 0}}');
-        });
+        $this->tool($http)->getTransactions('2025-01-01', '2025-01-31');
 
-        $tool = new TransactionsTool($client, 'https://penny.example.com', 'ro-key');
-
-        $tool->getTransactions('2025-01-01', '2025-01-31');
-
-        $headerLine = $calls[0]['normalized_headers']['x-api-key'][0]
-            ?? $calls[0]['normalized_headers']['X-API-Key'][0]
-            ?? '';
-        self::assertStringContainsString('ro-key', $headerLine);
-        self::assertStringContainsString('api-key', strtolower($headerLine));
+        self::assertStringContainsString('ro-key', $http->requestHeaders(0)['x-api-key'][0]);
     }
 
     public function test_passes_limit_through(): void
     {
-        $client = new MockHttpClient();
-        $calls = [];
-        $client->setResponseFactory(static function ($method, $url, $options) use (&$calls) {
-            $calls[] = $url;
+        $http = new RecordingHttpClient();
+        $http->queue([$this->emptyPage()]);
 
-            return new MockResponse('{"data": [], "meta": {"page": 1, "limit": 50, "total": 0, "pages": 0}}');
-        });
+        $this->tool($http)->getTransactions('2025-01-01', '2025-01-31', 50);
 
-        $tool = new TransactionsTool($client, 'https://penny.example.com', 'ro-key');
+        self::assertSame(50, $http->calls[0]['options']['query']['limit']);
+    }
 
-        $tool->getTransactions('2025-01-01', '2025-01-31', 50);
+    public function test_omits_limit_when_not_given(): void
+    {
+        $http = new RecordingHttpClient();
+        $http->queue([$this->emptyPage()]);
 
-        self::assertSame('https://penny.example.com/api/receipts?from=2025-01-01&to=2025-01-31&limit=50', $calls[0]);
+        $this->tool($http)->getTransactions('2025-01-01', '2025-01-31');
+
+        self::assertArrayNotHasKey('limit', $http->calls[0]['options']['query']);
     }
 
     public function test_strips_trailing_slash_from_base_url(): void
     {
-        $client = new MockHttpClient();
-        $calls = [];
-        $client->setResponseFactory(static function ($method, $url, $options) use (&$calls) {
-            $calls[] = $url;
+        $http = new RecordingHttpClient();
+        $http->queue([$this->emptyPage()]);
 
-            return new MockResponse('{"data": [], "meta": {"page": 1, "limit": 10, "total": 0, "pages": 0}}');
-        });
+        $this->tool($http, 'https://penny.example.com/')->getTransactions('2025-01-01', '2025-01-31');
 
-        $tool = new TransactionsTool($client, 'https://penny.example.com/', 'ro-key');
-
-        $tool->getTransactions('2025-01-01', '2025-01-31');
-
-        self::assertSame('https://penny.example.com/api/receipts?from=2025-01-01&to=2025-01-31', $calls[0]);
+        self::assertSame('https://penny.example.com/api/receipts?from=2025-01-01&to=2025-01-31', $http->calls[0]['url']);
     }
 
     public function test_rejects_malformed_dates(): void
     {
-        $tool = new TransactionsTool(new MockHttpClient(), 'https://penny.example.com', 'ro-key');
+        $http = new RecordingHttpClient();
 
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage('YYYY-MM-DD');
 
-        $tool->getTransactions('01/01/2025', '2025-01-31');
+        $this->tool($http)->getTransactions('01/01/2025', '2025-01-31');
     }
 
     public function test_rejects_non_calendar_dates(): void
     {
-        $tool = new TransactionsTool(new MockHttpClient(), 'https://penny.example.com', 'ro-key');
+        $http = new RecordingHttpClient();
 
         $this->expectException(InvalidArgumentException::class);
 
-        $tool->getTransactions('2025-02-30', '2025-03-01');
+        $this->tool($http)->getTransactions('2025-02-30', '2025-03-01');
     }
 
     public function test_rejects_inverted_range(): void
     {
-        $tool = new TransactionsTool(new MockHttpClient(), 'https://penny.example.com', 'ro-key');
+        $http = new RecordingHttpClient();
 
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage("'to' date must not be before 'from' date");
 
-        $tool->getTransactions('2025-02-01', '2025-01-01');
+        $this->tool($http)->getTransactions('2025-02-01', '2025-01-01');
     }
 
     public function test_rejects_out_of_range_limit(): void
     {
-        $tool = new TransactionsTool(new MockHttpClient(), 'https://penny.example.com', 'ro-key');
+        $http = new RecordingHttpClient();
 
         $this->expectException(InvalidArgumentException::class);
         $this->expectExceptionMessage('between 1 and 100');
 
-        $tool->getTransactions('2025-01-01', '2025-01-31', 101);
+        $this->tool($http)->getTransactions('2025-01-01', '2025-01-31', 101);
     }
 
     public function test_errors_clearly_when_url_unconfigured(): void
     {
-        $tool = new TransactionsTool(new MockHttpClient(), '', 'ro-key');
+        $http = new RecordingHttpClient();
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('PENNYTRACK_URL');
 
-        $tool->getTransactions('2025-01-01', '2025-01-31');
+        $this->tool($http, '')->getTransactions('2025-01-01', '2025-01-31');
     }
 
     public function test_errors_clearly_when_api_key_unconfigured(): void
     {
-        $tool = new TransactionsTool(new MockHttpClient(), 'https://penny.example.com', '');
+        $http = new RecordingHttpClient();
+
+        $tool = new TransactionsTool(new PennyTrackClient(
+            $http,
+            new PennyTrackEndpoint('https://penny.example.com'),
+            new PennyTrackCredentials('', ''),
+        ));
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('PENNYTRACK_API_KEY');
@@ -164,46 +165,66 @@ final class TransactionsToolTest extends TestCase
 
     public function test_rejects_non_http_base_url(): void
     {
-        $tool = new TransactionsTool(new MockHttpClient(), 'ftp://penny.example.com', 'ro-key');
+        $http = new RecordingHttpClient();
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('http:// or https://');
 
-        $tool->getTransactions('2025-01-01', '2025-01-31');
+        $this->tool($http, 'ftp://penny.example.com')->getTransactions('2025-01-01', '2025-01-31');
     }
 
     public function test_reports_auth_failure_without_leaking_key(): void
     {
-        $client = new MockHttpClient(new MockResponse('{"error": "Invalid API key"}', ['http_code' => 401]));
+        $http = new RecordingHttpClient();
+        $http->queueWithStatus('{"error": "Invalid API key"}', 401);
 
-        $tool = new TransactionsTool($client, 'https://penny.example.com', 'secret-key');
-
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('rejected the API key');
-
-        $tool->getTransactions('2025-01-01', '2025-01-31');
+        try {
+            $this->tool($http)->getTransactions('2025-01-01', '2025-01-31');
+            self::fail('expected an auth failure');
+        } catch (RuntimeException $e) {
+            self::assertStringContainsString('rejected the API key', $e->getMessage());
+            self::assertStringNotContainsString('ro-key', $e->getMessage(), 'the key must not appear in a message');
+        }
     }
 
     public function test_reports_upstream_error_with_body(): void
     {
-        $client = new MockHttpClient(new MockResponse('{"error": "Invalid date range. \'to\' must not be before \'from\'."}', ['http_code' => 400]));
-
-        $tool = new TransactionsTool($client, 'https://penny.example.com', 'ro-key');
+        $http = new RecordingHttpClient();
+        $http->queueWithStatus('{"error": "Invalid date range. \'to\' must not be before \'from\'."}', 400);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('HTTP 400');
 
-        $tool->getTransactions('2025-01-01', '2025-01-31');
+        $this->tool($http)->getTransactions('2025-01-01', '2025-01-31');
     }
 
     public function test_reports_unexpected_response_shape(): void
     {
-        $client = new MockHttpClient(new MockResponse('{"unexpected": true}'));
-
-        $tool = new TransactionsTool($client, 'https://penny.example.com', 'ro-key');
+        $http = new RecordingHttpClient();
+        $http->queue(['{"unexpected": true}']);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('"data"');
+
+        $this->tool($http)->getTransactions('2025-01-01', '2025-01-31');
+    }
+
+    public function test_reports_an_unreachable_instance_as_a_message_not_a_crash(): void
+    {
+        // A transport failure, as distinct from a response: the point is that
+        // it arrives as the tool's own sentence naming the instance, rather
+        // than as an unhandled exception from the HTTP layer.
+        $http = new RecordingHttpClient();
+        $http->failWith('dns failure');
+
+        $tool = new TransactionsTool(new PennyTrackClient(
+            $http,
+            new PennyTrackEndpoint('https://penny.invalid'),
+            new PennyTrackCredentials('ro-key', ''),
+        ));
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Could not reach penny-track at https://penny.invalid');
 
         $tool->getTransactions('2025-01-01', '2025-01-31');
     }
