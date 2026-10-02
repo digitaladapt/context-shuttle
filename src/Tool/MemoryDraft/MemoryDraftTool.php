@@ -99,7 +99,7 @@ final class MemoryDraftTool
      * @return array<string, mixed> the service's own `{hits, misses}` payload,
      *                              carrying a `latest` block when recency was asked for
      */
-    public function recall(array $keys, ?int $depth = null, ?bool $include_cold = null, ?bool $latest = null): array
+    public function recall(array $keys = [], ?int $depth = null, ?bool $include_cold = null, ?bool $latest = null): array
     {
         $queries = [];
 
