@@ -4,29 +4,31 @@ declare(strict_types=1);
 
 namespace App\Tool\PennyTrack;
 
+use App\PennyTrack\PennyTrackClient;
 use InvalidArgumentException;
-use RuntimeException;
-use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface;
-use Symfony\Contracts\HttpClient\HttpClientInterface;
-use Throwable;
 
 /**
  * Penny-track transactions tool backed by the receipts API.
  *
  * penny-track is a self-hosted spending tracker. This tool exposes its
  * GET /api/receipts endpoint: a paginated list of logged transactions
- * filtered by an inclusive date range. Authentication uses the
- * X-API-Key header (a read-only key is sufficient; this tool only
- * reads, never mutates).
+ * filtered by an inclusive date range. Authentication uses an API key in the
+ * X-API-Key header (a read-only key is sufficient; this tool only reads,
+ * never mutates).
+ *
+ * Everything about *reaching* penny-track — the base URL, the key, the
+ * translation of a refused key into a sentence naming the variable to fix —
+ * lives in {@see PennyTrackClient}, because the create tool needs all of it
+ * too. What stays here is the argument surface, which is this tool's alone:
+ * the date range, and the range check that makes "to before from" a refusal
+ * with a sentence in it rather than an empty page.
  */
 final class TransactionsTool
 {
     private const DATE_PATTERN = '/^\d{4}-\d{2}-\d{2}$/';
 
     public function __construct(
-        private HttpClientInterface $httpClient,
-        private string $baseUrl,
-        private string $apiKey,
+        private PennyTrackClient $client,
     ) {
     }
 
@@ -48,9 +50,6 @@ final class TransactionsTool
         [$from, $to] = $this->validateDates($from, $to);
         $limit = $this->validateLimit($limit);
 
-        $config = $this->clientConfig();
-        $url = $config['url'].'/api/receipts';
-
         $query = [
             'from' => $from,
             'to' => $to,
@@ -60,44 +59,7 @@ final class TransactionsTool
             $query['limit'] = $limit;
         }
 
-        try {
-            $response = $this->httpClient->request('GET', $url, [
-                'headers' => [
-                    'X-API-Key' => $config['key'],
-                    'Accept' => 'application/json',
-                ],
-                'query' => $query,
-                'timeout' => 10,
-            ]);
-
-            $status = $response->getStatusCode();
-        } catch (TransportExceptionInterface $e) {
-            throw new RuntimeException(\sprintf('Could not reach penny-track at %s: %s', $config['url'], $e->getMessage()), 0, $e);
-        }
-
-        if (401 === $status || 403 === $status) {
-            throw new RuntimeException('Penny-track rejected the API key. Check PENNYTRACK_API_KEY (a read-only key is sufficient).');
-        }
-
-        if ($status >= 400) {
-            $body = '';
-
-            try {
-                $body = $response->getContent(false);
-            } catch (Throwable) {
-                // status already captured; body is best-effort for context
-            }
-
-            throw new RuntimeException(\sprintf('Penny-track returned HTTP %d for %s: %s', $status, $url, trim($body)));
-        }
-
-        $data = $response->toArray();
-
-        if (!isset($data['data']) || !\is_array($data['data'])) {
-            throw new RuntimeException('Unexpected response shape from penny-track: missing "data" array.');
-        }
-
-        return $data;
+        return $this->client->listReceipts($query);
     }
 
     /**
@@ -151,31 +113,5 @@ final class TransactionsTool
         }
 
         return $limit;
-    }
-
-    /**
-     * Resolve configuration, failing with a clear message when the
-     * deployment has not been pointed at a penny-track instance.
-     *
-     * @return array{url: string, key: string}
-     */
-    private function clientConfig(): array
-    {
-        $url = trim($this->baseUrl);
-        $key = trim($this->apiKey);
-
-        if ('' === $url) {
-            throw new RuntimeException('PENNYTRACK_URL is not configured. Set it in .env.local to the base URL of your penny-track instance (e.g. https://penny.example.com).');
-        }
-
-        if ('' === $key) {
-            throw new RuntimeException('PENNYTRACK_API_KEY is not configured. Create a read-only API key in penny-track (bin/console app:create-api-key) and set PENNYTRACK_API_KEY in .env.local.');
-        }
-
-        if (!preg_match('#^https?://#', $url)) {
-            throw new RuntimeException(\sprintf('PENNYTRACK_URL must start with http:// or https:// (got "%s").', $url));
-        }
-
-        return ['url' => rtrim($url, '/'), 'key' => $key];
     }
 }

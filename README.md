@@ -160,7 +160,8 @@ All configuration via environment variables — see `.env.example`. Key vars:
 | `MCP_SERVER_NAME` | `context-shuttle` | MCP serverInfo name |
 | `MCP_SERVER_VERSION` | `1.0.0` | MCP serverInfo version |
 | `CORS_RESOURCE_POLICY` | `same-site` | `Cross-Origin-Resource-Policy` header: `same-site`, `same-origin`, or `cross-origin` |
-| `PENNYTRACK_URL` / `PENNYTRACK_API_KEY` | empty | Enable the `get_transactions` tool |
+| `PENNYTRACK_URL` / `PENNYTRACK_API_KEY` | empty | Enable the `get_transactions` tool (the read key may be read-only) |
+| `PENNYTRACK_WRITE_API_KEY` | empty | **The penny-track write opt-in.** A **full-access** key; **empty means `create_transaction` does not exist** |
 | `VITALPULSE_URL` / `VITALPULSE_API_KEY` | empty | Enable the `get_health_logs` tool |
 | `NTFY_TOPIC` | empty | Enable the ntfy channel of `send_alert` |
 | `NTFY_URL` / `NTFY_TOKEN` | `https://ntfy.sh` / empty | Self-hosted ntfy server and access token |
@@ -188,6 +189,79 @@ delivery per channel.
 Alert channels are enabled by presence: set `NTFY_TOPIC`, `DISCORD_WEBHOOK_URL`,
 or both — every enabled channel receives every alert, and `send_alert` reports
 delivery per channel.
+
+### Spending (penny-track)
+
+Two tools against a self-hosted [penny-track](https://code.devgnome.com/public/penny-track)
+ledger: `get_transactions` reads spending over a date range, and
+`create_transaction` logs one. The second exists so a receipt that arrives by
+email can be recorded without anyone retyping it.
+
+```bash
+curl -X POST http://127.0.0.1:8000/tools/get_transactions \
+  -H 'Content-Type: application/json' \
+  -d '{"from":"2026-10-01","to":"2026-10-31"}'
+
+curl -X POST http://127.0.0.1:8000/tools/create_transaction \
+  -H 'Content-Type: application/json' \
+  -d '{"amount":2.13,"date":"2026-10-02","business":"Backblaze","category":"Software"}'
+```
+
+**`PENNYTRACK_WRITE_API_KEY` empty means there is no `create_transaction` tool
+at all.** While it is unset the tool is absent from `tools/list`, so a model
+cannot attempt a write this deployment would refuse — the same rule the
+calendar writes follow, and the one you can verify by looking rather than by
+reading a refusal. `/ready` reports the tool count, which changes when you set
+it.
+
+It is a **second variable** rather than a flag beside `PENNYTRACK_API_KEY`, and
+that is penny-track's shape rather than a preference: both kinds of key travel
+in the same `X-API-Key` header, and penny-track stores only a hash of each, so
+there is no way to ask whether a given key may write without attempting a
+write. Naming a write key is therefore the only statement that carries the
+answer. Reads keep using `PENNYTRACK_API_KEY`, where a read-only key is the
+right choice.
+
+#### The three safeguards
+
+`create_transaction` writes to a ledger, so it is the one tool here that does
+not pass what it is given straight through — `get_transactions` can report a
+typo, but a write has to decide whether what it is about to add belongs there.
+It refuses rather than repairs, except where the repair is provably safe:
+
+- **The category must already exist.**
+- **The business must already exist.**
+
+  Both are matched the ledger's way. Capitalisation, spacing and punctuation
+  are corrected, so `backblaze` finds `Backblaze` and lands as `Backblaze` — a
+  model reading a receipt email has no way to know which spelling you use. The
+  correction is reported back in the result's `note`, so it is never silent.
+
+  Matching **never drops a word**: folding removes case, spacing and
+  punctuation and nothing else. So `Backblaze, Inc.` does *not* resolve to a
+  stored `Backblaze`, because dropping `Inc.` is dropping a word — and a rule
+  that dropped words would also fold `Acme Consulting` into `Acme`, which are
+  two different businesses. It is refused instead, and the refusal names
+  `Backblaze` as the closest match, so recovering costs one more call with a
+  value the caller has just been handed.
+- **No transaction on that day for that amount, with the same business and
+  category.** This is much wider than penny-track's own guard, which only
+  refuses the same receipt logged twice within five minutes — reading the same
+  email again tomorrow would sail past that and leave a second copy of a real
+  expense. The refusal names the receipt that already covers it, because the
+  likeliest explanation is that it is already logged.
+
+The vocabulary checks are what make the duplicate check work: values are
+resolved before they are compared, so a near miss on the second call still
+matches the value the first call stored.
+
+A brand-new instance with no categories yet is the one case the checks cannot
+apply, because there is nothing to conform to — and refusing would make the
+very first transaction unloggable. It is accepted as given and **reported** in
+the result, since that is the moment a typo becomes permanent: everything
+logged afterwards is matched against it. Establish a new merchant or category
+by logging one receipt by hand in penny-track, and this tool will resolve it
+from then on.
 
 ### Memory access
 
