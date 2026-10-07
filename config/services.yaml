@@ -226,6 +226,26 @@ services:
     App\Tool\Echo\EchoTool:
         public: true
 
+    # ── Count (streaming example) ──────────────────────────────────────
+    # Public like every other handler: the SDK resolves tool and resource
+    # handlers by name from the compiled container. `CountTool` reaches the
+    # client through an injected `RequestContext`, and `CountResource` reads the
+    # lines the tool recorded on the same session — so the two share
+    # `CountStream`, which holds no state of its own (the session does).
+    App\Tool\Count\CountTool:
+        public: true
+
+    App\Tool\Count\CountResource:
+        public: true
+
+    # The lines the count run has emitted, keyed by session id. Its own pool
+    # rather than `cache.app`, and not the session — see CountStream for why
+    # re-saving the session from inside a tool corrupts the SDK's outgoing
+    # notification queue.
+    App\Tool\Count\CountStream:
+        arguments:
+            $pool: '@count_stream'
+
     # ── Penny-track ─────────────────────────────────────────────────────
     # The endpoint and the keys are services because more than one tool needs
     # the same answer: the read tool and the create tool both build requests

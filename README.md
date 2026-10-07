@@ -110,17 +110,55 @@ curl -X POST http://127.0.0.1:8000/tools/get_weather \
   -d '{"location":"Berlin","forecast_days":2,"units":"imperial"}'
 ```
 
-The server is **stateless per request** for MCP: every POST creates a session,
-marks it initialized, processes the message, and discards it. No `Mcp-Session-Id`
-is required. This is spec-compliant for stateless servers and the simplest
-deployment model; a persistent-session mode is a roadmap item (see
-`docs/design/ROADMAP.md`).
+**MCP sessions are required.** A `tools/call` or `tools/list` sent without one is
+refused with `400`, per the streamable-HTTP spec; clients must `initialize` first
+and send `Mcp-Session-Id` on later requests (see
+`docs/examples/streaming-count-tool.md` for a full handshake-then-call sequence,
+and `docs/design/SPEC.md` for why). Sessions live in the `mcp_sessions` cache
+pool, so the handshake spans requests — point that pool at a shared backend for
+a multi-worker deployment.
+
+REST is the surface that needs no session: `POST /tools/{name}` mints one for the
+request and discards it, since a REST caller cannot resume one.
+
+## Streaming tools
+
+A tool can send notifications *while it runs*, and the MCP transport delivers
+them as they happen: the call answers with `text/event-stream` and the frames
+arrive one at a time, followed by the usual result. The `count` tool is the
+working example — it counts to a number, one line a second, reporting progress
+and (with `notify: true`) a `count://stream` resource update each second.
+
+```bash
+# Streams: notifications arrive during the call, result at the end.
+curl -sN -X POST http://127.0.0.1:8000/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H "Mcp-Session-Id: $SID" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
+        "name":"count","arguments":{"count":4,"notify":true},
+        "_meta":{"progressToken":"tok-1"}}}'
+```
+
+**REST never streams.** A `POST /tools/{name}` caller gets one JSON body, so a
+streaming tool returns everything at the end instead of narrating itself:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/tools/count \
+  -H 'Content-Type: application/json' -d '{"count":4}'
+# {"tool":"count","result":{"count":4,…,"streamed":false,"lines":[1,2,3,4]}}
+```
+
+That is a deliberate difference, carried on the request as
+`_meta: {"app/streaming": false}` rather than special-cased per tool. The full
+walkthrough — the channels, the resource, and the design reasoning — is in
+[`docs/examples/streaming-count-tool.md`](docs/examples/streaming-count-tool.md).
 
 ## Endpoints
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/mcp` | JSON-RPC over HTTP (initialize, tools/list, tools/call, ping) |
+| POST | `/mcp` | JSON-RPC over HTTP (initialize, tools/list, tools/call, resources/read, ping) |
 | GET | `/tools` | Tool inventory with schemas |
 | POST | `/tools/{name}` | Invoke a tool (same pipeline as MCP) |
 | GET | `/openapi.json` | Generated OpenAPI 3.1 spec |

@@ -1,0 +1,33 @@
+# Count tool — a working streaming example, and the transport's test fixture.
+#
+# The numbers are emitted as notifications during the call, so this tool's
+# behaviour depends on the protocol surface rather than on its arguments: the
+# same call streams over MCP and returns everything at once over REST. See
+# docs/examples/streaming-count-tool.md.
+#
+# The description is written without the word "resource" on purpose:
+# ProviderLeakageTest rejects "source" anywhere in a tool description, and
+# "resource" contains it. Reword rather than loosen the guard.
+name: count
+description: >-
+  Count to a number, one line a second, reporting progress as it goes.
+  A streaming example and transport test fixture: over MCP it emits progress
+  and, with notify, an update notice for count://stream each second, and the
+  lines counted so far can be read back from count://stream; over REST every
+  line comes back at the end. Has no real purpose beyond exercising streaming.
+handler: App\Tool\Count\CountTool::count
+parameters:
+  count:
+    type: integer
+    description: 'How high to count. Default: 5.'
+    required: false
+    default: 5
+    minimum: 1
+    maximum: 20
+  notify:
+    type: boolean
+    description: >-
+      Emit an update notice for count://stream each second, in addition to
+      progress. Default: false.
+    required: false
+    default: false

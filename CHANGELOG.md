@@ -8,7 +8,29 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **Memory: `memory_recall` can now answer "what was written recently?" — the
+- **A streaming example: `count`.** A fixture tool with no purpose beyond
+  exercising the transport — it counts to a number (1–20, default 5), one line a
+  second, and reports itself as it goes. Over MCP the call answers with
+  `text/event-stream` and each second delivers a `notifications/progress` frame
+  (a percentage) and, with `notify: true`, a `notifications/resources/updated`
+  frame for `count://stream`; a new `resources/read` of that URI returns the
+  lines counted so far plus how many remain, so the numbers live in a readable
+  place rather than in a notification the client would have to accumulate. The
+  full walkthrough, with real transcripts, is
+  `docs/examples/streaming-count-tool.md`.
+
+  This is the first resource in the project, and the first tool whose behaviour
+  depends on which transport called it. Both were previously claimed to be
+  impossible here — see the two corrections below.
+
+- **`count://stream` — an MCP resource.** Registered in code
+  (`CountResourceRegistrar`) rather than from YAML, because a resource's shape (a
+  URI and a MIME type, no arguments) is not a tool's, and stretching the tool
+  contract to cover both would be worse than one declaration beside the class
+  that serves it. Its state is keyed by session id in a dedicated `count_stream`
+  cache pool.
+
+- **`memory_recall` can now answer "what was written recently?" — the
   question a session opens with.** `keys` is no longer required, and
   `{"latest": true}` with no keys returns the keys written most recently, a few
   sentences each. This is the only recall possible before the model knows any
@@ -41,6 +63,16 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Two documentation claims about streaming were wrong, and are corrected.**
+  `docs/design/DESIGN_CONSIDERATIONS.md` said stateless MCP meant "no
+  `notifications/*` push, no progress streaming"; that has been false since the
+  move to the official SDK, whose transport answers a tool that suspends on a
+  notification with an SSE stream. The README separately said no `Mcp-Session-Id`
+  was required, contradicting both the code and `docs/design/SPEC.md`, which has
+  required one since the SDK migration. Both are now accurate, and
+  `DESIGN_CONSIDERATIONS.md` gains a "Why REST never streams" section recording
+  the decision and the failure that forced it.
+
 - **Memory: the `memory_*` tools now describe what a small model actually
   needs to know to get a useful answer in one call.** `memory_recall`'s
   `depth` parameter documented a hard-coded `(default: 2)` that the store no
@@ -54,6 +86,20 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
   asking for?".
 
 ### Fixed
+
+- **REST returned 500 for any tool that sent a notification.** `POST
+  /tools/{name}` runs the same pipeline as MCP, so a notifying tool suspended its
+  fiber and the transport answered with an SSE stream; the controller then read
+  that body with `(string) $response->getBody()`, which — for the SDK's
+  `CallbackStream` — *runs* the stream callback, echoing frames into output, and
+  returns `''`. Headers were therefore already on the wire when Symfony tried to
+  send its own, and the request died as an opaque 500. REST calls now carry
+  `_meta: {"app/streaming": false}` on the JSON-RPC request (`StreamingIntent`),
+  so a streaming tool takes its non-streaming path there: it returns the whole
+  result at once and does not wait out its own cadence. The declaration rides on
+  the request rather than in shared state, so one caller's choice cannot reach
+  another's call, and the controller refuses a streamed body outright as a
+  backstop. `count` over REST is the regression test.
 
 - **The penny-track create tool sent its headers as a corrupted string** —
   caught by its own test before the tool had ever been exercised. The header

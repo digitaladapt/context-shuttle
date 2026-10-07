@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Mcp;
 
+use App\Tool\Count\CountResourceRegistrar;
 use Mcp\Capability\Registry\ReferenceHandler;
 use Mcp\Server;
 use Mcp\Server\Session\Psr16SessionStore;
@@ -29,6 +30,10 @@ use Symfony\Component\Cache\Psr16Cache;
  * two PHP requests, under FrankenPHP as much as under any other SAPI.
  *
  * The pool is built once and shared, so every call site sees the same store.
+ *
+ * One element is not YAML-driven: the `count://stream` resource that the
+ * `count` example writes to. Resources have a different shape from tools and
+ * are declared in code; see `CountResourceRegistrar`.
  */
 final class McpServerFactory
 {
@@ -43,6 +48,7 @@ final class McpServerFactory
      */
     public function __construct(
         private readonly YamlToolRegistrar $registrar,
+        private readonly CountResourceRegistrar $countResourceRegistrar,
         private readonly ContainerInterface $container,
         private readonly LoggerInterface $logger,
         private readonly EventDispatcherInterface $eventDispatcher,
@@ -74,6 +80,12 @@ final class McpServerFactory
             ->setSession($this->sessionStore());
 
         $this->registrar->declareOn($builder);
+
+        // Tools come from YAML; resources do not, because a resource has a
+        // different shape (a URI and a MIME type, no arguments) and stretching
+        // the YAML to cover both would be a worse contract than one declaration
+        // in code. `count`'s stream is the only one, and this is it.
+        $this->countResourceRegistrar->declareOn($builder);
 
         return $builder->build();
     }
