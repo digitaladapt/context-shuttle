@@ -22,8 +22,22 @@ each ephemeral session initialized before processing, so `tools/call` works
 without a prior `initialize`. Clients that do send `initialize` first get a
 correct response — they just don't need it.
 
-Trade-off: no `notifications/*` push, no progress streaming. Acceptable for
-a tool registry whose tools are request/response.
+**Correction (streaming).** An earlier revision of this document said this
+statelessness meant "no `notifications/*` push, no progress streaming". That was
+wrong, and had been wrong since the move to the official SDK. A tool that sends
+a notification suspends its fiber, and `StreamableHttpTransport` answers a
+suspended fiber with `text/event-stream` rather than a buffered body — so
+`notifications/progress`, `notifications/resources/updated` and the rest all
+reach the client **during** the call, on a session that exists only for that
+call. Statelessness and streaming are orthogonal here: the notification does not
+need state to outlive the request, only to reach the client before the request
+ends. `count` (see below) exercises this end to end.
+
+The trade-off the statelessness *does* carry is narrower: nothing a tool says is
+delivered after its call has returned, because there is no session left to
+address. Anything a client should still be able to read later has to be fetched
+in a later request — which is exactly why the streaming example puts its payload
+in a readable resource instead of in the notifications.
 
 Note that statelessness does not remove the client's obligation to send
 `MCP-Protocol-Version`. The streamable HTTP spec requires it on every request
@@ -31,6 +45,39 @@ after `initialize`, and browser clients cannot send it unless the server lists
 it in `Access-Control-Allow-Headers` — a header the server itself ignores still
 has to be advertised, or the preflight fails and the request never happens.
 See `CorsSubscriber::ALLOW_HEADERS`.
+
+## Why REST never streams
+
+Both surfaces run the same pipeline, deliberately, so that validation, error
+mapping and logging cannot drift between them. Streaming is the one place that
+shared pipeline has to behave differently, and it is worth being explicit about
+why, because the failure mode of getting it wrong is a 500 rather than a wrong
+answer.
+
+MCP's streamable HTTP transport answers a notifying tool with an SSE stream. A
+REST caller has one JSON body to return and no way to read an event stream, so
+for REST the stream is not a message delivered — it is a message that corrupts
+the response. In practice it corrupted it badly: `ToolRestController` read the
+response body with `(string) $response->getBody()`, and the SDK's
+`CallbackStream::__toString()` *runs* the callback — echoing SSE frames straight
+into output — and then returns `''`. Headers were therefore sent part-way
+through building the response, and Symfony's own attempt to send its headers
+then failed, surfacing as an opaque 500 for **any** tool that notified.
+
+The fix is a declaration, not a special case in the tool: calls made on behalf
+of REST carry `_meta: {"app/streaming": false}`, and a tool consults it before
+notifying (`App\Mcp\StreamingIntent`). Absent means allowed, so MCP — which does
+not send the flag — keeps streaming, and only an explicit `false` disables it.
+The flag rides on the request rather than in a shared service, so a worker
+serving two callers cannot leak one's choice into the other's call, and a tool
+that ignores the flag entirely still works: it just streams to a caller that
+cannot read it, which the controller now refuses with a named error rather than a
+corrupted body.
+
+`count` is the worked example of both paths, and its REST response reports
+`"streamed": false` so a caller can see the transport's choice rather than infer
+it from a fast reply. The full story, with transcripts, is in
+`docs/examples/streaming-count-tool.md`.
 
 ## Why YAML
 
@@ -113,3 +160,10 @@ does not. See the non-goal in `ROADMAP.md`.
   checking; clients sending extra keys get a 422. Deliberate.
 - Tool handler services must be `public: true` in services.yaml (PSR-11
   resolution from the compiled container). Documented per-service.
+- **Resources are declared in code, not YAML.** The tool YAML is a *tool*
+  contract — a name, a JSON Schema, typed parameters. A resource has a
+  different shape (a URI, a MIME type, no arguments), and rather than stretch
+  one format across both, the single resource this project has
+  (`count://stream`) is registered where it is served, in
+  `CountResourceRegistrar`. A second resource would extend that registrar, not
+  the YAML loader.

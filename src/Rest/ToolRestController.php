@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Rest;
 
 use App\Mcp\McpServerFactory;
+use App\Mcp\StreamingIntent;
 use App\ToolRegistry\ToolRegistry;
 use GuzzleHttp\Psr7\HttpFactory;
 use Mcp\Server\Session\SessionInterface;
@@ -28,6 +29,14 @@ use Symfony\Component\HttpFoundation\Response;
  * The call is made against a session minted and destroyed within this request —
  * the SDK requires one for any non-`initialize` request, but a REST caller
  * neither has nor needs a session of its own.
+ *
+ * The one thing REST genuinely cannot share with MCP is streaming. A
+ * notification suspends the tool's fiber and the SDK answers that with an event
+ * stream, which a REST caller neither asked for nor could read; so every call
+ * here declares `app/streaming: false` (see `StreamingIntent`) and a streaming
+ * tool returns its whole result instead of narrating itself. Shared pipeline,
+ * explicitly different transport — rather than a shared pipeline that pretends
+ * the two transports are the same.
  */
 final class ToolRestController
 {
@@ -68,6 +77,24 @@ final class ToolRestController
         );
 
         $response = $this->callThroughPipeline($name, $arguments);
+
+        // A streamed body must never be coerced to a string. The SDK's
+        // `CallbackStream::__toString()` runs the response callback, which
+        // `echo`es SSE frames straight into output and then returns `''` — so
+        // by the time the (empty) string came back, headers would already be
+        // on the wire and Symfony's own `send()` would fail with a warning
+        // about modifying headers, surfacing as an opaque 500.
+        //
+        // `toolCallRequest()` asks for no streaming, so this should not arise;
+        // it is a guard, not a branch. If it ever does fire, the caller gets a
+        // named failure instead of a corrupted response.
+        if (str_starts_with($response->getHeaderLine('Content-Type'), 'text/event-stream')) {
+            return new JsonResponse(
+                ['error' => 'Tool opened a stream on the REST surface, which cannot carry one.'],
+                Response::HTTP_INTERNAL_SERVER_ERROR,
+            );
+        }
+
         $payload = json_decode((string) $response->getBody(), true);
 
         if (!\is_array($payload)) {
@@ -154,6 +181,13 @@ final class ToolRestController
                 // An empty argument bag must encode as `{}`, not `[]`, or the
                 // JSON-RPC params fail schema validation on the way in.
                 'arguments' => [] === $arguments ? new stdClass() : $arguments,
+                // REST has exactly one JSON body to return and cannot be sent
+                // an event stream, so tools are told not to open one. Without
+                // this, a tool that notifies suspends its fiber, the transport
+                // answers with SSE, and the body coercion above is what breaks
+                // — see the guard in `invoke()`. MCP omits the flag entirely,
+                // which is what leaves streaming on by default there.
+                '_meta' => [StreamingIntent::META_KEY => false],
             ],
         ], \JSON_THROW_ON_ERROR);
 

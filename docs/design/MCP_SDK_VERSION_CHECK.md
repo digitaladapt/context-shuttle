@@ -39,13 +39,36 @@ Grep the SDK for these before bumping — if one moved, the migration doc's
 
 | Area | Symbols |
 |---|---|
-| Server assembly | `Server::builder()`, `setServerInfo`, `setInstructions`, `setContainer`, `setLogger`, `setEventDispatcher`, `setReferenceHandler`, `setSession`, `addTool`, `build`, `run` |
+| Server assembly | `Server::builder()`, `setServerInfo`, `setInstructions`, `setContainer`, `setLogger`, `setEventDispatcher`, `setReferenceHandler`, `setSession`, `addTool`, `addResource`, `build`, `run` |
 | Transport | `Server\Transport\StreamableHttpTransport` (constructor, `middleware:` argument) |
-| Sessions | `Server\Session\Psr16SessionStore`, `Server\Session\SessionManager` |
+| Sessions | `Server\Session\Psr16SessionStore`, `Server\Session\SessionManager`, `Server\Session\SessionInterface` |
 | Handlers | `Capability\Registry\ReferenceHandler`, `ReferenceHandlerInterface`, `ElementReference`, `RegistryInterface` |
 | Events | `Event\RequestEvent`, `Event\ResponseEvent`, `Event\ErrorEvent` |
 | Schema | `Schema\Tool`, `Schema\ToolAnnotations`, `Schema\Request\CallToolRequest`, `Schema\Result\CallToolResult` |
 | Exceptions | `Exception\ToolCallException` |
+| Streaming | `Server\RequestContext` (and its injection over any handler that type-hints it), `Server\ClientGateway` (`notify`, `progress`), `Schema\Notification\ProgressNotification`, `Schema\Notification\ResourceUpdatedNotification` |
+| Resources | `Schema\ResourceDefinition`, `Schema\Content\TextResourceContents`, `Schema\Result\ReadResourceResult` |
+
+### Two streaming behaviours to re-check on any bump
+
+These are not APIs but behaviours, and each is load-bearing for the streaming
+example. Neither is a documented contract, so both can move in a minor release:
+
+1. **A tool that suspends on a notification gets an SSE response.**
+   `StreamableHttpTransport::handlePostRequest` branches on whether a fiber is
+   suspended. If that branch changes, `count` stops streaming.
+2. **`notifications/resources/updated` carries only a `uri`.** The example is
+   built around this — the payload is fetched from `count://stream` rather than
+   carried on the notification. If a future revision adds a payload member and
+   the SDK starts populating it, that is an opportunity, not a break, but the
+   design note in `docs/examples/streaming-count-tool.md` §7 would want
+   revisiting.
+
+One further trap, not a versioning risk: the SDK keeps its outgoing notification
+queue on the session (`_mcp.outgoing_queue`), so a tool must not `save()` the
+session while it holds a reference to it — the write resurrects notifications
+the transport has already flushed. See `CountStream` for the full account and
+the pool-based alternative.
 
 ## After an intentional bump
 

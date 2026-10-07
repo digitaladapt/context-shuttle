@@ -32,6 +32,22 @@ framework:
             mcp_sessions:
                 adapter: cache.adapter.filesystem
 
+            # Streaming-example state (CountStream).
+            #
+            # Holds the lines the `count` tool has emitted, keyed by MCP
+            # session id, so the `count://stream` resource can report a run in
+            # progress. Deliberately NOT on the session itself: the SDK keeps
+            # its notification queue there, and a write from inside a tool
+            # re-saves that queue as the tool's copy remembers it, resurrecting
+            # notifications the transport already delivered. A dedicated pool
+            # keeps the two writers apart. See CountStream for the full story.
+            #
+            # Needs to survive between requests, and to be shared across
+            # workers if the deployment has more than one — same reasoning as
+            # mcp_sessions above.
+            count_stream:
+                adapter: cache.adapter.filesystem
+
             # Interactive-request store (PendingRequestStore).
             #
             # A dedicated pool rather than cache.app so pending requests can
