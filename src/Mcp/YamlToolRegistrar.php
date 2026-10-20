@@ -212,8 +212,24 @@ final class YamlToolRegistrar
                 idempotentHint: false,
                 openWorldHint: true,
             ),
-            // The one destructive memory verb, and the hint a client uses to
-            // ask before running it.
+            // Revise is the genuinely mixed one: `demote` is reversible and
+            // reachable by default, but `purge` destroys. The hint is per tool,
+            // not per argument, so it has to describe the worst thing the tool
+            // can do — marking it non-destructive would hide a destroy behind a
+            // verb whose default does nothing of the kind. Not idempotent
+            // either: demoting an already-cold sentence is a no-op, but the
+            // report differs, and revision moves on a change.
+            'memory_revise' => new ToolAnnotations(
+                title: 'Revise sentences',
+                readOnlyHint: false,
+                destructiveHint: true,
+                idempotentHint: false,
+                openWorldHint: true,
+            ),
+            // The memory verb that destroys a whole key, and the hint a client
+            // uses to ask before running it. `memory_revise` can destroy too,
+            // but only one sentence and only when asked; this is the one that
+            // cannot be undone at all.
             'memory_forget' => new ToolAnnotations(
                 title: 'Forget a key',
                 readOnlyHint: false,

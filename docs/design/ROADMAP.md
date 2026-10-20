@@ -38,12 +38,15 @@ this deployment *operates*, and memory-draft is not one of them — it is a
 store these tools own the contents of. So writes are in scope here
 (`memory_remember`), for the same reason `calendar_create_event` is: the data
 is ours, the blast radius is our own store, and the alternative is a
-deployment that can read its own history but never add to it. One operation
-remains apart: `memory_forget` destroys, has no undo, and exists only because
-a fact being *wrong* (a stale credential, a superseded decision) needs an
-answer that `replace` cannot give — the store's own design keeps everything
-else recoverable, and the tool's description says which of the two situations
-it is for.
+deployment that can read its own history but never add to it. Two operations
+remain apart as destructive: `memory_forget` destroys a whole key, and
+`memory_revise` with `disposition: purge` destroys one sentence. Neither has an
+undo, and both exist only because a fact being *wrong* (a stale credential, a
+superseded decision) needs an answer that `replace` cannot give — `replace`
+retires every hot sentence on a key, so correcting one detail used to cost every
+good fact beside it. The store's own design keeps everything else recoverable:
+`memory_revise` defaults to `demote`, which is reversible by re-stating the
+sentence, and both tools' descriptions say which of the situations they are for.
 
 ## Near term
 

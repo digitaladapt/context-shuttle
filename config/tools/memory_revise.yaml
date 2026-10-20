@@ -1,0 +1,61 @@
+# Memory revise — retire or destroy one sentence, without touching the rest.
+#
+# The gap between the other two write-shaped tools: `remember` with
+# `mode: replace` retires every hot sentence on a key, and `forget` deletes the
+# whole key. Neither can express "this one sentence is wrong, the others are
+# fine", which is the common case once a fact goes stale in one detail.
+#
+# Sentences are addressed by their text rather than by an ID. That is what a
+# caller has to hand after `recall`, and the store already treats text as unique
+# per key, so an ID would be a second address for something that has one.
+#
+# `requires: memory_store` — same gate as the rest of the family; with no store
+# there is nothing to revise, and the verb should not appear at all.
+name: memory_revise
+description: >-
+  Retire or destroy individual sentences of a keyword, selected by their text.
+  Use this when one sentence is stale or wrong and the rest of the keyword is
+  still good — for correcting something in place rather than rewriting a key.
+  There are no sentence IDs: pass the text itself, optionally with wildcards
+  (`*`, `?`) under `match: glob`, or a substring under `match: contains`. Anchors
+  are implicit, so a glob pattern matches the whole sentence from end to end: use
+  `*word*` to find a word anywhere. The default disposition is `demote`, which
+  moves the sentence to cold storage and is reversible — re-stating it with
+  `memory_remember` promotes it back to hot, so there is nothing to undo.
+  `purge` destroys the sentence outright and is irreversible; it is refused when
+  the pattern would match more than one sentence, so narrow it with `match:
+  exact` or run with `dry_run: true` first to see what it would take. Pinned
+  sentences are skipped unless `includePinned` is true, and each is reported
+  rather than silently ignored. A pattern that finds nothing in the requested
+  tier but does exist in the other one says so in `hint`, instead of looking
+  like a miss. Nothing is an error except an ambiguous purge: a pattern that
+  matches nothing is reported as a miss.
+requires: memory_store
+handler: App\Tool\MemoryDraft\MemoryDraftTool::revise
+parameters:
+  key:
+    type: string
+    description: 'The keyword owning the sentences, e.g. "context-shuttle". Spelling variants resolve to the same key.'
+    required: true
+  text:
+    type: string
+    description: 'The sentence text to match — the sentence as `recall` printed it, or a pattern. Compared ignoring case and surrounding whitespace.'
+    required: true
+  disposition:
+    type: string
+    enum: [demote, purge]
+    description: 'demote (default) moves the sentence to cold storage; it stays retrievable and re-stating it promotes it back to hot. purge destroys it, with no undo, and is refused if more than one sentence matches.'
+  match:
+    type: string
+    enum: [exact, contains, glob]
+    description: 'How `text` selects sentences. exact (default) compares the whole sentence. contains takes a substring. glob takes a wildcard pattern where `*` is any run of characters and `?` is one — anchored at both ends, so `deploy*` must start the sentence and `*deploy*` is the way to match a word anywhere.'
+  tier:
+    type: string
+    enum: [hot, cold, any]
+    description: 'Which tier to select from. hot (default) is what recall shows. cold reaches demoted sentences. any is both, and is what a hint will suggest when a pattern misses in the tier you asked for.'
+  dry_run:
+    type: boolean
+    description: 'Report what would change and leave the store untouched. Worth doing before any purge: it shows the matched sentences in full, and it never bumps the revision.'
+  include_pinned:
+    type: boolean
+    description: 'Act on pinned sentences too. By default they are skipped and counted in `skipped.pinned`, because pinned marks the facts the store was told to keep.'

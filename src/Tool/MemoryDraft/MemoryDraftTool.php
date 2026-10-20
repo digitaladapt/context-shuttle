@@ -283,10 +283,99 @@ final class MemoryDraftTool
     }
 
     /**
+     * Retire or destroy individual sentences, addressed by their text.
+     *
+     * The gap this fills: `remember` with `mode: replace` retires every hot
+     * sentence on a key, and `forget` deletes the whole key. Neither can say
+     * "this one sentence is wrong, the rest are fine".
+     *
+     * Sentences are addressed by their text because that is what a caller
+     * actually has — it just read one back from `recall` — and because the text
+     * is already unique per key, so no other address is needed. There are no IDs
+     * to hold, leak, or go stale.
+     *
+     * `demote` is the default because it is reversible, and re-stating a
+     * demoted sentence through `remember` promotes it back — so there is no
+     * "undo" concept to learn. `purge` is opt-in, single-sentence only, and the
+     * service refuses it when the pattern would take more than one: an ambiguous
+     * destroy is a mistake being made quickly, not a feature.
+     *
+     * A refusal from the service (HTTP 422) is surfaced as an exception rather
+     * than returned, because it means nothing was changed and the pattern has to
+     * be narrowed — a different call, not a later one.
+     *
+     * @param string      $key            the keyword the sentences belong to
+     * @param string      $text           the sentence text to match
+     * @param string|null $disposition    `demote` (default, reversible) or `purge` (destroys)
+     * @param string|null $match          `exact` (default), `contains` or `glob` (`*`, `?`, anchored at both ends)
+     * @param string|null $tier           `hot` (default), `cold` or `any`
+     * @param bool|null   $dry_run        report what would change without changing it
+     * @param bool|null   $include_pinned act on pinned sentences, which are otherwise skipped
+     *
+     * @return array<string, mixed> `{results, changed}` — one report per item,
+     *                              each carrying the matched sentences, what was
+     *                              done to them, the new revision and the
+     *                              resulting tier counts
+     */
+    public function revise(
+        string $key,
+        string $text,
+        ?string $disposition = null,
+        ?string $match = null,
+        ?string $tier = null,
+        ?bool $dry_run = null,
+        ?bool $include_pinned = null,
+    ): array {
+        $key = $this->validateKey($key, 'key');
+
+        if ('' === trim($text)) {
+            throw new InvalidArgumentException('text must not be empty. A blank pattern is not a no-op: under match: contains it would select every sentence on the key.');
+        }
+
+        $item = [
+            'key' => $key,
+            'text' => trim($text),
+        ];
+
+        $disposition = $this->validateDisposition($disposition);
+        if (null !== $disposition) {
+            $item['disposition'] = $disposition;
+        }
+
+        $match = $this->validateMatch($match);
+        if (null !== $match) {
+            $item['match'] = $match;
+        }
+
+        $tier = $this->validateTier($tier);
+        if (null !== $tier) {
+            $item['tier'] = $tier;
+        }
+
+        if (null !== $dry_run) {
+            $item['dryRun'] = $dry_run;
+        }
+
+        if (null !== $include_pinned) {
+            $item['includePinned'] = $include_pinned;
+        }
+
+        $payload = $this->request('POST', '/api/revise', ['items' => [$item]]);
+
+        if (!isset($payload['results']) || !\is_array($payload['results'])) {
+            throw new RuntimeException('Unexpected response shape from memory-draft: missing "results" array.');
+        }
+
+        return $payload;
+    }
+
+    /**
      * Permanently delete a key and every sentence under it.
      *
-     * There is no undo, and this is the only operation here that destroys
-     * anything — every other path either appends, demotes, or retires.
+     * There is no undo, and this is one of only two operations here that
+     * destroy anything — the other is `revise` with `disposition: purge`. Every
+     * other path either appends, demotes, or retires, and `revise` defaults to
+     * the demoting one.
      * memory-draft answers 404 when nothing matched; that is turned into an
      * "is not there" message, because from a caller's side "nothing named
      * that" and "I deleted nothing" are the same answer and only one of them
@@ -534,5 +623,50 @@ final class MemoryDraftTool
         }
 
         return $mode;
+    }
+
+    private function validateDisposition(?string $disposition): ?string
+    {
+        if (null === $disposition) {
+            return null;
+        }
+
+        $disposition = trim($disposition);
+
+        if (!\in_array($disposition, ['demote', 'purge'], true)) {
+            throw new InvalidArgumentException('disposition must be "demote" or "purge". "demote" retires a sentence to cold storage and is reversible; "purge" destroys it.');
+        }
+
+        return $disposition;
+    }
+
+    private function validateMatch(?string $match): ?string
+    {
+        if (null === $match) {
+            return null;
+        }
+
+        $match = trim($match);
+
+        if (!\in_array($match, ['exact', 'contains', 'glob'], true)) {
+            throw new InvalidArgumentException('match must be "exact", "contains" or "glob".');
+        }
+
+        return $match;
+    }
+
+    private function validateTier(?string $tier): ?string
+    {
+        if (null === $tier) {
+            return null;
+        }
+
+        $tier = trim($tier);
+
+        if (!\in_array($tier, ['hot', 'cold', 'any'], true)) {
+            throw new InvalidArgumentException('tier must be "hot", "cold" or "any".');
+        }
+
+        return $tier;
     }
 }

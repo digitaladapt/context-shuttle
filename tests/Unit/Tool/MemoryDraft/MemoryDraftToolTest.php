@@ -402,6 +402,131 @@ final class MemoryDraftToolTest extends TestCase
         $this->tool()->stats();
     }
 
+    // ── revise ──────────────────────────────────────────────────────────
+
+    public function test_revise_posts_a_single_item_and_returns_the_service_result(): void
+    {
+        $this->client()->queue(['{"results":[{"key":"deploy","text":"Rollback is one command.","matched":1,"changed":1,"revision":2,"demoted":["Rollback is one command."],"purged":[],"skipped":{"pinned":0}}],"changed":1}']);
+
+        $result = $this->tool()->revise('deploy', 'Rollback is one command.');
+
+        self::assertSame('POST', $this->client()->calls[0]['method']);
+        self::assertSame('https://memory.example.com/api/revise', $this->client()->calls[0]['url']);
+        self::assertSame(
+            ['items' => [['key' => 'deploy', 'text' => 'Rollback is one command.']]],
+            $this->body(),
+        );
+
+        self::assertSame(['Rollback is one command.'], $result['results'][0]['demoted']);
+        self::assertSame(1, $result['changed']);
+    }
+
+    public function test_revise_omits_every_optional_field_when_not_given(): void
+    {
+        // The defaults belong to the service: demote, exact, hot. Sending them
+        // explicitly would be this tool deciding selection policy, and the two
+        // would then disagree the first time the service changed a default.
+        $this->client()->queue(['{"results":[{"key":"a"}],"changed":0}']);
+
+        $this->tool()->revise('a', 'text');
+
+        self::assertSame(['items' => [['key' => 'a', 'text' => 'text']]], $this->body());
+    }
+
+    public function test_revise_passes_every_option_through(): void
+    {
+        $this->client()->queue(['{"results":[{"key":"a"}],"changed":0}']);
+
+        $this->tool()->revise('a', 'text', 'purge', 'glob', 'any', true, true);
+
+        self::assertSame(
+            ['items' => [[
+                'key' => 'a',
+                'text' => 'text',
+                'disposition' => 'purge',
+                'match' => 'glob',
+                'tier' => 'any',
+                'dryRun' => true,
+                'includePinned' => true,
+            ]]],
+            $this->body(),
+        );
+    }
+
+    public function test_revise_rejects_a_blank_text(): void
+    {
+        // A blank pattern is not a no-op: under `match: contains` it would
+        // select every sentence on the key, which is the opposite of the
+        // one-sentence job this tool exists for.
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/text must not be empty/');
+
+        $this->tool()->revise('a', '   ');
+    }
+
+    public function test_revise_rejects_an_unknown_disposition(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/demote.*purge/');
+
+        $this->tool()->revise('a', 'text', 'delete');
+    }
+
+    public function test_revise_rejects_an_unknown_match_kind(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/exact.*contains.*glob/');
+
+        $this->tool()->revise('a', 'text', 'demote', 'regex');
+    }
+
+    public function test_revise_rejects_an_unknown_tier(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/hot.*cold.*any/');
+
+        $this->tool()->revise('a', 'text', 'demote', 'exact', 'warm');
+    }
+
+    public function test_revise_rejects_a_blank_key_before_making_a_request(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        try {
+            $this->tool()->revise('  ', 'text');
+        } finally {
+            self::assertSame([], $this->client()->calls, 'a refused call must not reach the service');
+        }
+    }
+
+    public function test_revise_surfaces_the_ambiguous_purge_refusal(): void
+    {
+        // The service refuses a purge that would take more than one sentence
+        // with HTTP 422 and `{"error": ...}`. Nothing was changed, so this has
+        // to arrive as a failure carrying the service's own reason — the
+        // caller's next move is a narrower pattern, which it cannot choose
+        // without knowing why it was refused.
+        $this->client()->queueWithStatus('{"error":"Demand is ambiguous: 3 sentences match.","changed":0}', 422);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/HTTP 422.*Demand is ambiguous: 3 sentences match/');
+
+        $this->tool()->revise('a', '*todo*', 'purge', 'glob');
+    }
+
+    public function test_revise_treats_a_miss_as_a_result_rather_than_an_error(): void
+    {
+        // "Nothing matched" is an ordinary answer here — the report says so,
+        // and it may carry a hint about the other tier. Turning it into an
+        // exception would make the hint unreachable.
+        $this->client()->queue(['{"results":[{"key":"a","text":"nope","matched":0,"changed":0,"hint":"Found in cold; pass tier: any."}],"changed":0}']);
+
+        $result = $this->tool()->revise('a', 'nope');
+
+        self::assertSame(0, $result['results'][0]['matched']);
+        self::assertStringContainsString('tier: any', $result['results'][0]['hint']);
+    }
+
     // ── forget ──────────────────────────────────────────────────────────
 
     public function test_forget_deletes_by_url_encoded_key(): void

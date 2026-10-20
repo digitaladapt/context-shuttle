@@ -7,12 +7,15 @@
 name: memory_forget
 description: >-
   Permanently delete a keyword and every sentence stored under it. There is
-  no undo and nothing is retained: this is the only memory operation that
-  destroys anything — every other path either appends, demotes old
-  sentences to cold, or retires them so they remain retrievable. Use it
-  when the fact itself is wrong and keeping it in cold storage would be a
-  liability (a stale credential, a superseded decision). If the only
-  problem is that the fact is old or no longer current, prefer
+  no undo and nothing is retained. This removes the key as a whole — its
+  sentences, its revision counter and its recorded aliases — so it is the
+  right call only when the whole keyword has gone bad. For one wrong
+  sentence among good ones, use memory_revise instead: with `disposition:
+  purge` it destroys just that sentence, and with the default `demote` it
+  merely moves it to cold storage, where it stays retrievable. Those two
+  are the only calls that destroy anything, and revise does it one sentence
+  at a time. If the only problem is that a fact is old rather than wrong,
+  prefer
   memory_remember with mode replace: it retires the current sentences
   instead of destroying them. If no key matches, nothing is deleted and
   the call says so.
