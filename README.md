@@ -303,11 +303,11 @@ from then on.
 
 ### Memory access
 
-Five tools backed by a [memory-draft](https://github.com/digitaladapt/memory-draft)
-instance: `memory_recall`, `memory_remember`, `memory_keys`, `memory_stats`,
-`memory_forget`. The premise is that a model repeatedly needs to answer *"what
-do I know about X?"*, and that the cheapest useful answer is a sentence or two
-retrieved **by name** — no embeddings, no ranking model.
+Six tools backed by a [memory-draft](https://github.com/digitaladapt/memory-draft)
+instance: `memory_recall`, `memory_remember`, `memory_revise`, `memory_keys`,
+`memory_stats`, `memory_forget`. The premise is that a model repeatedly needs to
+answer *"what do I know about X?"*, and that the cheapest useful answer is a
+sentence or two retrieved **by name** — no embeddings, no ranking model.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/tools/memory_remember \
@@ -332,12 +332,13 @@ whatever happened since" in one call.
 
 **`MEMORY_DRAFT_URL` empty means there is no memory tool surface at all.** The
 family does not appear in `tools/list`, so a model cannot recall, write to, or
-forget a store the operator did not name — and `memory_forget` is the one
-irreversible verb in it. That is deliberate divergence from the *read* tools
-elsewhere (penny-track, vital-pulse, the calendar reads), which stay listed on
-an unconfigured deployment and explain themselves: those read services whose
-address is incidental to the question being asked, whereas here the URL *is*
-the resource, and a recall from a store nobody named is not a configuration
+forget a store the operator did not name — and the irreversible verbs
+(`memory_forget`, and `memory_revise` with `disposition: purge`) are in it. That
+is deliberate divergence from the *read* tools elsewhere (penny-track,
+vital-pulse, the calendar reads), which stay listed on an unconfigured
+deployment and explain themselves: those read services whose address is
+incidental to the question being asked, whereas here the URL *is* the resource,
+and a recall from a store nobody named is not a configuration
 problem worth reporting.
 
 memory-draft has **no authentication and no per-operation permissions**, so
@@ -366,11 +367,21 @@ the first:
   revisions, per-tier counts and aliases; a guessed key is exactly what a
   keyword store punishes.
 
-`memory_forget` is the exception to the read-and-report boundary, and it is the
-only destructive operation in the tool surface. It is gated with the rest of
-the family — a model cannot call it where no store is named — and its
-description says plainly that there is no undo and that `replace` is the
-right tool when the fact is merely superseded rather than wrong.
+`memory_forget` and `memory_revise --disposition purge` are the exceptions to the
+read-and-report boundary, and together they are the only destructive operations
+in the tool surface. Both are gated with the rest of the family — a model cannot
+call them where no store is named — and their descriptions say plainly that
+there is no undo.
+
+Where the two differ is the size of what they take. `memory_forget` takes the
+whole key and is the right tool when the fact itself is wrong; `memory_revise`
+takes individual sentences by their text and is the right tool when one detail
+went stale and the rest of the key is still good. It defaults to `demote`, which
+only moves a sentence to cold storage and is reversible by re-stating it, so
+`purge` has to be asked for by name. It is also refused outright when the
+pattern would match more than one sentence: with no sentence IDs and no undo,
+a selection the caller has not seen is not one to guess at, and `dry_run: true`
+shows it first.
 
 ### Email access
 

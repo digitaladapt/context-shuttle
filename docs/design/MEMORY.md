@@ -4,7 +4,7 @@
 
 ## What this is
 
-Five tools — `memory_recall`, `memory_remember`, `memory_keys`,
+Six tools — `memory_recall`, `memory_remember`, `memory_revise`, `memory_keys`,
 `memory_stats`, `memory_forget` — backed by a
 [memory-draft](https://github.com/digitaladapt/memory-draft) instance.
 
@@ -32,20 +32,21 @@ REST + OpenAPI surface) are the reason the mirror exists.
 
 ## The gate: `MEMORY_DRAFT_URL` is the whole permission model
 
-**With the variable empty, none of the five tools is registered at all.**
+**With the variable empty, none of the six tools is registered at all.**
 They are absent from `tools/list`, so a model cannot recall from, write to, or
 forget a store the operator did not name.
 
 This is a stronger statement than a refusal at call time, and it is the one an
-operator can verify by looking. It matters most for `memory_forget` — the only
-irreversible verb in the family — but it applies to the reads too, and that is
+operator can verify by looking. It matters most for the irreversible verbs —
+`memory_forget` (a whole key) and `memory_revise` with `disposition: purge` (one
+sentence) — but it applies to the reads too, and that is
 a **deliberate divergence from the pattern used elsewhere**:
 
 | Family | Unconfigured behaviour | Why |
 |---|---|---|
 | penny-track, vital-pulse, calendar reads | Listed; invoking says which variable to set | The tool reads a service whose *address* is incidental to the question. "List my transactions" has an answer beyond "configure me". |
 | calendar **writes** | Absent | Opt-in, because a mutation is not recoverable. |
-| **memory (all five)** | **Absent** | The URL **is** the resource. A recall from a store nobody named is not a configuration problem to report — it is a memory this deployment does not have. A tool that always answers "not configured" would be furniture. |
+| **memory (all six)** | **Absent** | The URL **is** the resource. A recall from a store nobody named is not a configuration problem to report — it is a memory this deployment does not have. A tool that always answers "not configured" would be furniture. |
 
 The last row is the one worth re-reading before "fixing" the inconsistency:
 the difference is not read-versus-write, it is whether the missing

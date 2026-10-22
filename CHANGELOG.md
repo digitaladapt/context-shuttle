@@ -61,6 +61,40 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
   tests, which is the only place the two repositories' agreement on this shape
   can be checked.
 
+- **`memory_revise` — retire or destroy one sentence, without touching the rest.**
+  The gap between the two existing write-shaped tools: `memory_remember` with
+  `mode: replace` retires *every* hot sentence on a key, so correcting one stale
+  detail cost every good fact beside it, and `memory_forget` deletes the key
+  outright. Neither could express "this one sentence is no longer true".
+
+  Sentences are addressed **by their text**, not by an id: that is what a caller
+  has after `recall`, and the store already enforces uniqueness on `sha256(text)`
+  per key, so an id would be a second name for a thing that has one — at the cost
+  of a stale-handle bug the store does not otherwise have. `match` chooses how
+  the text selects: `exact` (default, the sentence as `recall` printed it),
+  `contains` (a substring), or `glob` (`*` and `?`, anchored at both ends).
+
+  `disposition` defaults to **`demote`**, which moves sentences to cold storage:
+  they stop being what recall shows, remain retrievable with `include_cold`, and
+  are promoted back to hot by simply re-stating them. `purge` destroys, needs to
+  be asked for by name, and is **refused when the pattern would match more than
+  one sentence** — with no ids and no undo, a selection the caller has not seen
+  is not one to guess at. `dry_run: true` runs the identical match and reports
+  `changed: 0` with the full listing, which is what makes `contains`/`glob`
+  usable against `purge` at all.
+
+  Three details are reported rather than left to be inferred: a pattern that
+  misses in the requested tier but matches in the other one says so in `hint`
+  instead of looking like a miss; pinned sentences are skipped by default and
+  counted in `skipped.pinned`, because a pin means "do not trim this" and both
+  dispositions are trims; and `remaining` carries the post-change per-tier
+  counts, since "did I just empty the key?" is the immediate next question and a
+  second recall to answer it is waste. The revision is bumped once per call, so a
+  caller holding an older revision is flagged backfilled on its next write rather
+  than overwriting silently.
+
+  Requires the same `memory_store` gate as the rest of the family.
+
 ### Changed
 
 - **Two documentation claims about streaming were wrong, and are corrected.**

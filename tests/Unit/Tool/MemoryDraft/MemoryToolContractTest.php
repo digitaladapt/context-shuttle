@@ -154,4 +154,68 @@ final class MemoryToolContractTest extends TestCase
 
         self::assertStringContainsString('un-pin', $pin, 'pin must distinguish explicit false from omission');
     }
+
+    public function test_revise_says_demote_is_the_reversible_default(): void
+    {
+        // The whole reason `demote` is the default is that a caller who does not
+        // think about dispositions still gets the reversible one. If the
+        // description reads as though both are equal choices, a small model will
+        // pick `purge` for a stale fact and lose it.
+        $description = $this->memoryTools()['memory_revise']->description;
+
+        self::assertStringContainsString('default disposition is `demote`', $description);
+        self::assertStringContainsString('reversible', $description);
+    }
+
+    public function test_revise_says_purge_is_refused_when_ambiguous(): void
+    {
+        // The guard is the safety property of the destructive path, and a
+        // caller has to know it exists — otherwise the refusal reads as a bug
+        // and the instinct is to reach for a broader pattern.
+        $description = $this->memoryTools()['memory_revise']->description;
+
+        self::assertStringContainsString('refused when', $description);
+        self::assertStringContainsString('purge', $description);
+    }
+
+    public function test_revise_says_globs_are_anchored_at_both_ends(): void
+    {
+        // `deploy*` looks like "contains deploy" to most readers and is not.
+        // Guessing wrong selects fewer sentences — safe, but confusing, and the
+        // fix (`*deploy*`) is not one a caller would think to try.
+        $match = $this->memoryTools()['memory_revise']->parameters['match']['description'] ?? '';
+
+        self::assertStringContainsString('anchored at both ends', $match);
+        self::assertStringContainsString('*deploy*', $match);
+    }
+
+    public function test_revise_does_not_offer_ids(): void
+    {
+        // The design decision worth protecting: sentences are addressed by
+        // their text, because that is what a caller already has. An `id`
+        // parameter appearing here would mean the address model changed.
+        $parameters = $this->memoryTools()['memory_revise']->parameters;
+
+        self::assertArrayNotHasKey('id', $parameters);
+        self::assertArrayHasKey('text', $parameters);
+    }
+
+    public function test_revise_says_pinned_sentences_are_skipped_not_ignored_silently(): void
+    {
+        // "Do nothing, quietly" is the worst outcome for a caller that expected
+        // a change; it looks identical to a miss.
+        $includePinned = $this->memoryTools()['memory_revise']->parameters['include_pinned']['description'] ?? '';
+
+        self::assertStringContainsString('skipped', $includePinned);
+    }
+
+    public function test_revise_says_a_miss_is_reported_with_a_tier_hint(): void
+    {
+        // Without this, a pattern that exists only in cold looks exactly like a
+        // sentence that was never stored, and the caller gives up or purges
+        // something else to compensate.
+        $description = $this->memoryTools()['memory_revise']->description;
+
+        self::assertStringContainsString('hint', $description);
+    }
 }

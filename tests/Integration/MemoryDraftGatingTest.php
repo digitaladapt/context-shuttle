@@ -105,7 +105,7 @@ final class MemoryDraftGatingTest extends WebTestCase
         self::bootKernel();
         $names = $this->toolNames();
 
-        foreach (['memory_recall', 'memory_remember', 'memory_keys', 'memory_stats', 'memory_forget'] as $tool) {
+        foreach (['memory_recall', 'memory_remember', 'memory_keys', 'memory_stats', 'memory_forget', 'memory_revise'] as $tool) {
             self::assertContains($tool, $names);
         }
     }
@@ -146,7 +146,7 @@ final class MemoryDraftGatingTest extends WebTestCase
         $client->request('GET', '/ready');
         $with = json_decode((string) $client->getResponse()->getContent(), true)['tools'];
 
-        self::assertSame(5, $with - $without, 'exactly the five memory tools are added');
+        self::assertSame(6, $with - $without, 'exactly the six memory tools are added');
     }
 
     public function test_an_unavailable_memory_tool_is_not_found_over_rest(): void
@@ -179,6 +179,7 @@ final class MemoryDraftGatingTest extends WebTestCase
 
         self::assertArrayNotHasKey('/tools/memory_recall', $paths);
         self::assertArrayNotHasKey('/tools/memory_forget', $paths);
+        self::assertArrayNotHasKey('/tools/memory_revise', $paths);
     }
 
     public function test_an_unreachable_store_is_a_clear_message_not_a_500(): void

@@ -235,4 +235,146 @@ final class MemoryDraftLiveTest extends TestCase
 
         $this->tool()->forget(self::KEY);
     }
+
+    /**
+     * A sentence is demoted by its text, and the sentences beside it are
+     * untouched — which is the entire reason this tool exists. `replace` would
+     * have retired all three.
+     */
+    public function test_revise_demotes_one_sentence_and_leaves_the_others_hot(): void
+    {
+        $this->tool()->remember(self::KEY, 'Rollback is one command. Rollback is verified in staging. Deploys are blue-green.');
+
+        $result = $this->tool()->revise(self::KEY, 'Rollback is verified in staging.');
+
+        $report = $result['results'][0];
+        self::assertSame(self::KEY, $report['key']);
+        self::assertSame('demote', $report['disposition']);
+        self::assertSame(1, $report['changed']);
+        self::assertSame(1, $report['matched']);
+        self::assertCount(1, $report['entries']);
+
+        $hot = $this->tool()->recall([self::KEY]);
+        $texts = array_column($hot['hits'][0]['entries'], 'text');
+
+        self::assertNotContains('Rollback is verified in staging.', $texts, 'a demoted sentence stops being what recall shows');
+        self::assertContains('Rollback is one command.', $texts);
+        self::assertContains('Deploys are blue-green.', $texts);
+
+        // Demotion is not deletion: the sentence is still there, one tier down.
+        $cold = $this->tool()->recall([self::KEY], include_cold: true);
+        self::assertContains('Rollback is verified in staging.', array_column($cold['hits'][0]['entries'], 'text'));
+    }
+
+    /**
+     * Re-stating a demoted sentence promotes it back, which is why `demote`
+     * needs no undo command: the write path already is one.
+     */
+    public function test_a_demoted_sentence_returns_to_hot_when_restated(): void
+    {
+        $this->tool()->remember(self::KEY, 'Kept. To be demoted.');
+        $this->tool()->revise(self::KEY, 'To be demoted.');
+
+        $this->tool()->remember(self::KEY, 'To be demoted.');
+
+        $hot = $this->tool()->recall([self::KEY]);
+        $entries = $hot['hits'][0]['entries'];
+        $restated = array_values(array_filter($entries, static fn (array $e): bool => 'To be demoted.' === $e['text']));
+
+        self::assertCount(1, $restated, 're-stating must not leave a duplicate row behind');
+        self::assertSame('hot', $restated[0]['tier']);
+    }
+
+    /**
+     * `dry_run` has to match exactly what a real call would: it is the only
+     * thing standing between a `glob` pattern and an irreversible purge, so a
+     * rehearsal that under-reported would defeat its purpose.
+     */
+    public function test_dry_run_reports_the_match_without_changing_anything(): void
+    {
+        $this->tool()->remember(self::KEY, 'Alpha fact. Beta fact.');
+
+        $dry = $this->tool()->revise(self::KEY, '*fact*', match: 'glob', dry_run: true);
+
+        $report = $dry['results'][0];
+        self::assertSame(0, $report['changed']);
+        self::assertSame(2, $report['matched'], 'the rehearsal must report both sentences a real glob call would take');
+        self::assertCount(2, $report['entries'], 'and list them, so the pattern can be judged before it is trusted');
+
+        $hot = $this->tool()->recall([self::KEY]);
+        self::assertCount(2, $hot['hits'][0]['entries'], 'nothing may move during a dry run');
+    }
+
+    /**
+     * The safety rule that only exists because there are no sentence ids: an
+     * ambiguous purge is refused, so a too-broad pattern cannot destroy facts
+     * the caller never saw. The service answers 422 and the tool surfaces it.
+     */
+    public function test_a_multi_sentence_purge_is_refused_rather_than_guessed_at(): void
+    {
+        $this->tool()->remember(self::KEY, 'First sentence. Second sentence.');
+
+        try {
+            $this->tool()->revise(self::KEY, '*sentence*', disposition: 'purge', match: 'glob');
+            self::fail('a purge matching two sentences must be refused');
+        } catch (RuntimeException $e) {
+            self::assertStringContainsString('more than one', $e->getMessage());
+        }
+
+        $hot = $this->tool()->recall([self::KEY]);
+        self::assertCount(2, $hot['hits'][0]['entries'], 'a refused purge must change nothing');
+    }
+
+    /**
+     * A purge that matches one sentence is allowed and is the real thing: the
+     * row is gone from both tiers, not demoted.
+     */
+    public function test_a_single_sentence_purge_destroys_the_row(): void
+    {
+        $this->tool()->remember(self::KEY, 'This one goes. This one stays.');
+
+        $result = $this->tool()->revise(self::KEY, 'This one goes.', disposition: 'purge');
+        self::assertSame(1, $result['results'][0]['changed']);
+
+        $cold = $this->tool()->recall([self::KEY], include_cold: true);
+        $texts = array_column($cold['hits'][0]['entries'], 'text');
+
+        self::assertNotContains('This one goes.', $texts, 'a purged sentence is in neither tier');
+        self::assertContains('This one stays.', $texts);
+    }
+
+    /**
+     * `remaining` answers "did I just empty the key?" without a second read,
+     * and the revision moves so a caller holding the old one is flagged rather
+     * than silently overwriting.
+     */
+    public function test_revise_reports_remaining_counts_and_bumps_the_revision(): void
+    {
+        $before = $this->tool()->remember(self::KEY, 'One. Two.');
+        $revision = $before['results'][0]['revision'];
+
+        $result = $this->tool()->revise(self::KEY, 'One.');
+        $report = $result['results'][0];
+
+        self::assertGreaterThan($revision, $report['revision'], 'a change must bump the revision');
+        self::assertSame(1, $report['remaining']['hot']);
+        self::assertSame(1, $report['remaining']['cold']);
+    }
+
+    /**
+     * A pattern that misses in the requested tier but hits in the other one
+     * says so, instead of reading as "no such sentence".
+     */
+    public function test_a_tier_miss_explains_where_the_sentence_actually_is(): void
+    {
+        $this->tool()->remember(self::KEY, 'Lives in the cold tier.');
+        $this->tool()->revise(self::KEY, 'Lives in the cold tier.');
+
+        $result = $this->tool()->revise(self::KEY, 'Lives in the cold tier.');
+        $report = $result['results'][0];
+
+        self::assertSame(0, $report['changed']);
+        self::assertArrayHasKey('hint', $report);
+        self::assertStringContainsString('cold', $report['hint']);
+    }
 }

@@ -57,6 +57,7 @@ final class MemoryDraftGateTest extends TestCase
             $this->definition('memory_keys', 'memory_store'),
             $this->definition('memory_stats', 'memory_store'),
             $this->definition('memory_forget', 'memory_store'),
+            $this->definition('memory_revise', 'memory_store'),
         ];
     }
 
@@ -83,16 +84,16 @@ final class MemoryDraftGateTest extends TestCase
         );
 
         self::assertSame(
-            ['memory_recall', 'memory_remember', 'memory_keys', 'memory_stats', 'memory_forget'],
+            ['memory_recall', 'memory_remember', 'memory_keys', 'memory_stats', 'memory_forget', 'memory_revise'],
             $registry->names(),
         );
-        self::assertSame(5, $registry->count());
+        self::assertSame(6, $registry->count());
     }
 
     public function test_a_whitespace_only_value_is_still_unconfigured(): void
     {
         // `MEMORY_DRAFT_URL=" "` in an env file is a plausible typo, and
-        // treating it as configured would serve five tools that cannot work.
+        // treating it as configured would serve six tools that cannot work.
         $registry = new ToolRegistry(
             $this->memoryDefinitions(),
             new MemoryDraftGate(new MemoryDraftEndpoint('   ')),
@@ -168,7 +169,7 @@ final class MemoryDraftGateTest extends TestCase
             static fn (ToolDefinition $definition): bool => str_starts_with($definition->name, 'memory_'),
         ));
 
-        self::assertCount(5, $memory, 'the memory family should be five tools in config/tools');
+        self::assertCount(6, $memory, 'the memory family should be six tools in config/tools');
 
         foreach ($memory as $definition) {
             self::assertSame(
