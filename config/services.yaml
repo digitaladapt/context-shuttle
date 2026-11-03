@@ -22,6 +22,10 @@ parameters:
     env(DISCORD_WEBHOOK_URL): ''
     env(DISCORD_MENTION_USER_ID): ''
 
+    env(TASKCHAMPION_SYNC_URL): ''
+    env(TASKCHAMPION_SYNC_CLIENT_ID): ''
+    env(TASKCHAMPION_SYNC_ENCRYPTION_SECRET): ''
+
     env(IMAP_HOST): ''
     env(IMAP_PORT): ''
     env(IMAP_USERNAME): ''
@@ -98,6 +102,14 @@ parameters:
     ntfy_token: '%env(string:default::NTFY_TOKEN)%'
     discord_webhook_url: '%env(string:default::DISCORD_WEBHOOK_URL)%'
     discord_mention_user_id: '%env(string:default::DISCORD_MENTION_USER_ID)%'
+
+    # Taskwarrior tool configuration. TASKCHAMPION_SYNC_URL is the sync
+    # server address; with it empty, all taskwarrior tools work locally
+    # without sync. The other two variables are required alongside the
+    # URL for sync to be enabled.
+    taskwarrior_sync_url: '%env(string:default::TASKCHAMPION_SYNC_URL)%'
+    taskwarrior_sync_client_id: '%env(string:default::TASKCHAMPION_SYNC_CLIENT_ID)%'
+    taskwarrior_sync_secret: '%env(string:default::TASKCHAMPION_SYNC_ENCRYPTION_SECRET)%'
 
     # Email tool configuration. IMAP_HOST is NOT probed at boot: a mail
     # server being down must never stop context-shuttle from starting, so
@@ -466,3 +478,50 @@ services:
         arguments:
             $webhookUrl: '%discord_webhook_url%'
             $mentionUserId: '%discord_mention_user_id%'
+
+    # ── Taskwarrior ───────────────────────────────────────────────────
+    App\Tool\Taskwarrior\TaskwarriorService:
+        arguments:
+            $syncUrl: '%taskwarrior_sync_url%'
+            $syncClientId: '%taskwarrior_sync_client_id%'
+            $syncSecret: '%taskwarrior_sync_secret%'
+
+    App\Tool\Taskwarrior\ListTasksTool:
+        public: true
+        arguments:
+            $service: '@App\Tool\Taskwarrior\TaskwarriorService'
+
+    App\Tool\Taskwarrior\CreateTaskTool:
+        public: true
+        arguments:
+            $service: '@App\Tool\Taskwarrior\TaskwarriorService'
+
+    App\Tool\Taskwarrior\UpdateTaskTool:
+        public: true
+        arguments:
+            $service: '@App\Tool\Taskwarrior\TaskwarriorService'
+
+    App\Tool\Taskwarrior\CompleteTaskTool:
+        public: true
+        arguments:
+            $service: '@App\Tool\Taskwarrior\TaskwarriorService'
+
+    App\Tool\Taskwarrior\DeleteTaskTool:
+        public: true
+        arguments:
+            $service: '@App\Tool\Taskwarrior\TaskwarriorService'
+
+    App\Tool\Taskwarrior\NextActionTool:
+        public: true
+        arguments:
+            $service: '@App\Tool\Taskwarrior\TaskwarriorService'
+
+    App\Tool\Taskwarrior\ProjectListTool:
+        public: true
+        arguments:
+            $service: '@App\Tool\Taskwarrior\TaskwarriorService'
+
+    App\Tool\Taskwarrior\SyncStatusTool:
+        public: true
+        arguments:
+            $service: '@App\Tool\Taskwarrior\TaskwarriorService'

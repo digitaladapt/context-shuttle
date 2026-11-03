@@ -1,0 +1,12 @@
+# taskwarrior_project_list — list all projects known to taskwarrior.
+#
+# Projects are created on-the-fly when a task is assigned one. Empty
+# when no project has ever been used. Use this to discover existing
+# project names before creating tasks in them.
+name: taskwarrior_project_list
+description: >
+  List all projects known to taskwarrior. Projects are created
+  on-the-fly when a task is assigned one; use this to discover existing
+  names before creating tasks in them.
+handler: App\Tool\Taskwarrior\ProjectListTool::projectList
+parameters: {}

@@ -1,0 +1,12 @@
+# taskwarrior_next_action — the highest-urgency ready pending task.
+#
+# Equivalent to running `task next` from the CLI. Returns the full task
+# object in taskwarrior's JSON format, or null if there are no pending
+# tasks. Useful for asking "what should I work on next?"
+name: taskwarrior_next_action
+description: >
+  Return the highest-urgency ready pending task, or null if there are
+  none. Equivalent to `task next`. The task object includes id,
+  description, project, tags, due date, priority, and urgency.
+handler: App\Tool\Taskwarrior\NextActionTool::nextAction
+parameters: {}

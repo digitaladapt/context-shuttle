@@ -1,0 +1,18 @@
+# taskwarrior_delete_task — permanently remove a taskwarrior task.
+#
+# This is destructive: the task is removed from the local database and
+# synced out. There is no undo except restoring from a sync-server
+# backup. Use taskwarrior_update_task with status=deleted for a
+# soft-delete that remains recoverable. A sync runs after deletion if
+# TASKCHAMPION_SYNC_URL is configured.
+name: taskwarrior_delete_task
+description: >
+  Permanently remove a taskwarrior task. Destructive — no undo except
+  from a sync-server backup. A sync runs after deletion if configured.
+handler: App\Tool\Taskwarrior\DeleteTaskTool::deleteTask
+parameters:
+  id:
+    type: integer
+    description: 'Task id to delete (required, positive integer).'
+    required: true
+    minimum: 1

@@ -1,0 +1,21 @@
+# taskwarrior_complete_task — mark a taskwarrior task as completed.
+#
+# An optional annotation string is recorded alongside the completion.
+# The task must exist and be pending. For permanent deletion use
+# taskwarrior_delete_task instead. A sync runs after completion if
+# TASKCHAMPION_SYNC_URL is configured.
+name: taskwarrior_complete_task
+description: >
+  Mark a taskwarrior task as completed. An optional annotation is
+  recorded. A sync runs after completion if configured.
+handler: App\Tool\Taskwarrior\CompleteTaskTool::completeTask
+parameters:
+  id:
+    type: integer
+    description: 'Task id to complete (required, positive integer).'
+    required: true
+    minimum: 1
+  annotation:
+    type: string
+    description: 'Optional comment recorded with the completion.'
+    required: false

@@ -1,0 +1,66 @@
+# taskwarrior_update_task — update one or more attributes of a pending
+# or completed taskwarrior task by its id.
+#
+# Only the fields provided are changed; omitted fields are left as-is.
+# Pass tags_add / tags_remove to manipulate tags without replacing them
+# entirely. Set status to "completed" to complete the task, or "deleted"
+# to mark it deleted (soft-delete, still recoverable). For permanent
+# deletion use taskwarrior_delete_task instead. A sync runs after the
+# update if TASKCHAMPION_SYNC_URL is configured.
+name: taskwarrior_update_task
+description: >
+  Update one or more attributes of a taskwarrior task by its id. Only
+  provided fields change; omitted fields stay as-is. Sets status to
+  completed or deleted, or manipulate tags with tags_add / tags_remove.
+  Runs a sync after the update if configured.
+handler: App\Tool\Taskwarrior\UpdateTaskTool::updateTask
+parameters:
+  id:
+    type: integer
+    description: 'Task id to update (required, positive integer).'
+    required: true
+    minimum: 1
+  description:
+    type: string
+    description: 'Optional new description.'
+    required: false
+  project:
+    type: string
+    description: 'Optional new project name.'
+    required: false
+  tags_add:
+    type: array
+    description: 'Optional tags to add (does not remove existing tags).'
+    required: false
+    items:
+      type: string
+  tags_remove:
+    type: array
+    description: 'Optional tags to remove.'
+    required: false
+    items:
+      type: string
+  due:
+    type: string
+    description: 'Optional new due date.'
+    required: false
+  priority:
+    type: string
+    description: 'Optional new priority: U, L, M, H.'
+    required: false
+    enum:
+      - U
+      - L
+      - M
+      - H
+  end:
+    type: string
+    description: 'Optional new end date (deadline).'
+    required: false
+  status:
+    type: string
+    description: 'Optional status change: "completed" to complete, "deleted" to soft-delete.'
+    required: false
+    enum:
+      - completed
+      - deleted

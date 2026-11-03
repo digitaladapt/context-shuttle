@@ -7,7 +7,7 @@
 #
 # Secrets are injected at runtime as env vars, never baked in (§8.12).
 
-# ── Stage: deps — composer dependencies (layer-cached) ─────────────────────
+# ── Stage: deps — composer dependencies (layer-cached) ────────────────────
 FROM dunglas/frankenphp:1-php8.5-trixie AS deps
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
@@ -27,6 +27,33 @@ COPY composer.json composer.lock symfony.lock ./
 RUN composer install --no-dev --no-interaction --prefer-dist \
     --optimize-autoloader --no-scripts
 
+# ── Stage: taskwarrior — compile taskwarrior v3 from source ────────────────
+FROM deps AS taskwarrior-build
+
+# Build dependencies for taskwarrior v3 (CMake + C++17 compiler).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        cmake \
+        g++ \
+        make \
+        ninja-build \
+        uuid-dev \
+        libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Fetch and compile taskwarrior v3 from the official release tarball.
+# Pinning to a specific release makes the image reproducible.
+ARG TASKWARRIOR_VERSION=3.0.0
+RUN curl -fsSL "https://github.com/GothenburgBitFactory/taskwarrior/releases/download/v${TASKWARRIOR_VERSION}/taskwarrior-${TASKWARRIOR_VERSION}.tar.gz" -o /tmp/taskwarrior.tar.gz \
+    && tar -xzf /tmp/taskwarrior.tar.gz -C /tmp \
+    && mkdir -p /tmp/taskwarrior-${TASKWARRIOR_VERSION}/build \
+    && cmake -S /tmp/taskwarrior-${TASKWARRIOR_VERSION} -B /tmp/taskwarrior-${TASKWARRIOR_VERSION}/build \
+           -DCMAKE_BUILD_TYPE=Release \
+           -DCMAKE_INSTALL_PREFIX=/usr/local \
+           -DBUILD_TESTING=OFF \
+    && cmake --build /tmp/taskwarrior-${TASKWARRIOR_VERSION}/build --parallel \
+    && cmake --install /tmp/taskwarrior-${TASKWARRIOR_VERSION}/build
+
 # ── Stage: build — full app + prod autoloader ──────────────────────────────
 FROM deps AS build
 
@@ -44,12 +71,16 @@ RUN APP_ENV=prod APP_SECRET=build-secret bin/console cache:warmup || true \
 # ── Stage: app — the runtime image ─────────────────────────────────────────
 FROM dunglas/frankenphp:1-php8.5-trixie AS app
 
-# Runtime set: ca-certificates (TLS for outbound tool calls) and curl
-# (HEALTHCHECK). No git/composer here — everything is compiled already.
+# Runtime set: ca-certificates (TLS for outbound tool calls), curl
+# (HEALTHCHECK), and taskwarrior (task CLI for taskwarrior tools).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates curl \
+        ca-certificates \
+        curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Copy the compiled taskwarrior binary from the build stage.
+COPY --from=taskwarrior-build /usr/local/bin/task /usr/local/bin/task
 
 # PHP configuration and FrankenPHP/Caddy app config
 COPY docker/php.ini /usr/local/etc/php/conf.d/app.ini
