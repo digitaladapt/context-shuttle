@@ -1,0 +1,43 @@
+# taskwarrior_create_task — create a new pending task in taskwarrior.
+#
+# Description is the only required field. All other attributes are
+# optional. A sync (if configured) runs after the task is created so
+# the new task is propagated to the sync server and other clients.
+name: taskwarrior_create_task
+description: >
+  Create a new pending task in taskwarrior. Description is required;
+  project, tags, due date, priority, and end date are optional. Runs
+  a sync after creation if TASKCHAMPION_SYNC_URL is configured.
+handler: App\Tool\Taskwarrior\CreateTaskTool::createTask
+parameters:
+  description:
+    type: string
+    description: 'Task description (required).'
+    required: true
+  project:
+    type: string
+    description: 'Optional project name. Creates the project if it does not exist.'
+    required: false
+  tags:
+    type: array
+    description: 'Optional tags to apply (e.g. ["work", "urgent"]).'
+    required: false
+    items:
+      type: string
+  due:
+    type: string
+    description: 'Optional due date. Any date string taskwarrior accepts (e.g. "2026-11-15", "tomorrow", "nov 15").'
+    required: false
+  priority:
+    type: string
+    description: 'Optional priority: U (urgency), L (low), M (medium), H (high).'
+    required: false
+    enum:
+      - U
+      - L
+      - M
+      - H
+  end:
+    type: string
+    description: 'Optional deadline (when the task stops being relevant). Same format as due.'
+    required: false

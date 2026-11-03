@@ -1,0 +1,11 @@
+# taskwarrior_sync_status — report sync configuration and last result.
+#
+# When TASKCHAMPION_SYNC_URL is empty, configured is false and the
+# other fields are null. When configured, the last sync attempt is
+# recorded from the most recent call to this tool.
+name: taskwarrior_sync_status
+description: >
+  Report whether taskwarrior sync is configured and when the last
+  sync attempt happened, along with its result code and any error.
+handler: App\Tool\Taskwarrior\SyncStatusTool::syncStatus
+parameters: {}

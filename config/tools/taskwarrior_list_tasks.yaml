@@ -1,0 +1,45 @@
+# taskwarrior_list_tasks — list tasks from the local taskwarrior data,
+# optionally synced from the configured taskchampion-sync-server.
+#
+# Pending tasks are returned by default. Set include_completed to true to
+# also see done/deleted tasks. Filter by project or tag, and page with
+# limit. No authentication is needed beyond the TASKCHAMPION_SYNC_URL env
+# var that configures sync (optional).
+name: taskwarrior_list_tasks
+description: >
+  List tasks from the local taskwarrior database, with optional sync from
+  the configured taskchampion-sync-server. Returns pending tasks by
+  default; pass include_completed=true to also see finished ones. Filter
+  by project or tag, and paginate with limit.
+handler: App\Tool\Taskwarrior\ListTasksTool::listTasks
+parameters:
+  status:
+    type: string
+    description: 'Task status to return: "pending" (default) or "all".'
+    required: false
+    default: pending
+    enum:
+      - pending
+      - all
+  project:
+    type: string
+    description: 'Restrict to a single project by name. Omit to search all projects.'
+    required: false
+  tag:
+    type: array
+    description: 'Restrict to tasks carrying all of these tags (AND semantics).'
+    required: false
+    items:
+      type: string
+  include_completed:
+    type: boolean
+    description: 'Include completed and deleted tasks. Defaults to false.'
+    required: false
+    default: false
+  limit:
+    type: integer
+    description: 'Page size, 1-500. Defaults to 50.'
+    required: false
+    default: 50
+    minimum: 1
+    maximum: 500
