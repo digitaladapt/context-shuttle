@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Tool\Taskwarrior;
 
+use DateTimeImmutable;
+use DateTimeInterface;
+use DateTimeZone;
 use InvalidArgumentException;
 use RuntimeException;
 
@@ -51,7 +54,7 @@ final class TaskwarriorService
 
         return [
             'configured' => true,
-            'last_sync' => (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format(\DateTimeInterface::ATOM),
+            'last_sync' => (new DateTimeImmutable('now', new DateTimeZone('UTC')))->format(DateTimeInterface::ATOM),
             'last_status' => $result['code'],
             'last_error' => $result['error'] ?? null,
         ];
@@ -80,16 +83,16 @@ final class TaskwarriorService
         }
 
         if (isset($filters['project'])) {
-            $cmd[] = '+PROJECT:' . escapeshellarg($filters['project']);
+            $cmd[] = '+PROJECT:'.escapeshellarg($filters['project']);
         }
 
         $tags = $filters['tag'] ?? [];
         foreach ($tags as $tag) {
-            $cmd[] = '+' . escapeshellarg($tag);
+            $cmd[] = '+'.escapeshellarg($tag);
         }
 
         $limit = $filters['limit'] ?? 200;
-        $cmd[] = 'limit:' . $limit;
+        $cmd[] = 'limit:'.$limit;
 
         $output = $this->run($cmd);
         $tasks = json_decode($output, true);
@@ -134,24 +137,24 @@ final class TaskwarriorService
         $cmd = [self::TASK_BINARY, 'add', '--', $desc];
 
         if (isset($attrs['project'])) {
-            $cmd[] = 'project:' . escapeshellarg($attrs['project']);
+            $cmd[] = 'project:'.escapeshellarg($attrs['project']);
         }
 
         $tags = $attrs['tags'] ?? [];
         foreach ($tags as $tag) {
-            $cmd[] = '+' . escapeshellarg($tag);
+            $cmd[] = '+'.escapeshellarg($tag);
         }
 
         if (isset($attrs['due'])) {
-            $cmd[] = 'due:' . escapeshellarg($attrs['due']);
+            $cmd[] = 'due:'.escapeshellarg($attrs['due']);
         }
 
         if (isset($attrs['priority'])) {
-            $cmd[] = 'priority:' . escapeshellarg($attrs['priority']);
+            $cmd[] = 'priority:'.escapeshellarg($attrs['priority']);
         }
 
         if (isset($attrs['end'])) {
-            $cmd[] = 'end:' . escapeshellarg($attrs['end']);
+            $cmd[] = 'end:'.escapeshellarg($attrs['end']);
         }
 
         $output = $this->run($cmd);
@@ -199,33 +202,33 @@ final class TaskwarriorService
         $cmd = [self::TASK_BINARY, (string) $id, 'modify'];
 
         if (isset($attrs['description'])) {
-            $cmd[] = 'description:' . escapeshellarg($attrs['description']);
+            $cmd[] = 'description:'.escapeshellarg($attrs['description']);
         }
 
         if (isset($attrs['project'])) {
-            $cmd[] = 'project:' . escapeshellarg($attrs['project']);
+            $cmd[] = 'project:'.escapeshellarg($attrs['project']);
         }
 
         $tagsAdd = $attrs['tags_add'] ?? [];
         foreach ($tagsAdd as $tag) {
-            $cmd[] = '+' . escapeshellarg($tag);
+            $cmd[] = '+'.escapeshellarg($tag);
         }
 
         $tagsRemove = $attrs['tags_remove'] ?? [];
         foreach ($tagsRemove as $tag) {
-            $cmd[] = '-' . escapeshellarg($tag);
+            $cmd[] = '-'.escapeshellarg($tag);
         }
 
         if (isset($attrs['due'])) {
-            $cmd[] = 'due:' . escapeshellarg($attrs['due']);
+            $cmd[] = 'due:'.escapeshellarg($attrs['due']);
         }
 
         if (isset($attrs['priority'])) {
-            $cmd[] = 'priority:' . escapeshellarg($attrs['priority']);
+            $cmd[] = 'priority:'.escapeshellarg($attrs['priority']);
         }
 
         if (isset($attrs['end'])) {
-            $cmd[] = 'end:' . escapeshellarg($attrs['end']);
+            $cmd[] = 'end:'.escapeshellarg($attrs['end']);
         }
 
         if (isset($attrs['status'])) {
@@ -379,9 +382,7 @@ final class TaskwarriorService
 
         if (0 !== $code) {
             $stderr = trim($stderr);
-            throw new RuntimeException(
-                \sprintf('Command failed (exit %d): %s%s', $code, trim($stdout), $stderr ? "\nSTDERR: $stderr" : ''),
-            );
+            throw new RuntimeException(\sprintf('Command failed (exit %d): %s%s', $code, trim($stdout), $stderr ? "\nSTDERR: $stderr" : ''));
         }
 
         return trim($stdout);

@@ -21,43 +21,41 @@ final class CreateTaskTool
     }
 
     /**
-     * @param array{
-     *     description: string,
-     *     project?: string,
-     *     tags?: list<string>,
-     *     due?: string,
-     *     priority?: string,
-     *     end?: string,
-     * } $attrs
+     * @param string            $description the task description (required)
+     * @param string|null       $project     optional project name
+     * @param list<string>|null $tags        optional tags
+     * @param string|null       $due         optional due date
+     * @param string|null       $priority    optional priority: U, L, M, H
+     * @param string|null       $end         optional deadline
      *
      * @return array{created: bool, id: int, description: string}
      */
-    public function createTask(array $attrs): array
-    {
-        $desc = trim($attrs['description'] ?? '');
+    public function createTask(
+        string $description,
+        ?string $project = null,
+        ?array $tags = null,
+        ?string $due = null,
+        ?string $priority = null,
+        ?string $end = null,
+    ): array {
+        $desc = trim($description);
         if ('' === $desc) {
             throw new InvalidArgumentException('description must not be empty.');
         }
 
-        $tags = $attrs['tags'] ?? [];
-        if (!\is_array($tags)) {
-            throw new InvalidArgumentException('tags must be a list of strings.');
-        }
+        $resolvedTags = $tags ?? [];
 
-        $priority = $attrs['priority'] ?? null;
-        if (null !== $priority && !\in_array(strtoupper($priority), ['U', 'L', 'M', 'H'], true)) {
+        $resolvedPriority = $priority;
+        if (null !== $resolvedPriority && !\in_array(strtoupper($resolvedPriority), ['U', 'L', 'M', 'H'], true)) {
             throw new InvalidArgumentException('priority must be one of: U, L, M, H (or omitted).');
         }
 
-        $due = $attrs['due'] ?? null;
-        $end = $attrs['end'] ?? null;
-
         return $this->service->create([
             'description' => $desc,
-            'project' => $attrs['project'] ?? null,
-            'tags' => $tags,
+            'project' => $project,
+            'tags' => $resolvedTags,
             'due' => $due,
-            'priority' => $priority,
+            'priority' => $resolvedPriority,
             'end' => $end,
         ]);
     }

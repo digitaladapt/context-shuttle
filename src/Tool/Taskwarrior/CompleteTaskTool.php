@@ -21,10 +21,15 @@ final class CompleteTaskTool
     }
 
     /**
+     * @param int         $id         the task id (required)
+     * @param string|null $annotation optional comment recorded with the completion
+     *
      * @return array{completed: bool, id: int}
      */
-    public function completeTask(int $id, ?string $annotation = null): array
-    {
+    public function completeTask(
+        int $id,
+        ?string $annotation = null,
+    ): array {
         if (0 === $id) {
             throw new InvalidArgumentException('id must be a positive integer.');
         }

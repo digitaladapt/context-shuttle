@@ -22,10 +22,13 @@ final class DeleteTaskTool
     }
 
     /**
+     * @param int $id the task id to delete (required)
+     *
      * @return array{deleted: bool, id: int}
      */
-    public function deleteTask(int $id): array
-    {
+    public function deleteTask(
+        int $id,
+    ): array {
         if (0 === $id) {
             throw new InvalidArgumentException('id must be a positive integer.');
         }

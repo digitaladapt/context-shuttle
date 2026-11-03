@@ -26,52 +26,42 @@ final readonly class ListTasksTool
     /**
      * List tasks.
      *
-     * @param array{
-     *     project?: string,
-     *     tag?: list<string>,
-     *     status?: string,
-     *     limit?: int,
-     *     include_completed?: bool,
-     * } $filters
+     * @param string|null       $status            'pending' (default) or 'all'
+     * @param string|null       $project           restrict to one project
+     * @param list<string>|null $tag               restrict to tasks carrying all these tags
+     * @param bool|null         $include_completed include completed/deleted tasks
+     * @param int|null          $limit             page size, 1-500
      *
      * @return array{tasks: list<array<string, mixed>>, count: int, has_more: bool}
      */
-    public function listTasks(array $filters = []): array
-    {
-        $limit = $filters['limit'] ?? self::DEFAULT_LIMIT;
-        if ($limit < 1 || $limit > self::MAX_LIMIT) {
-            throw new InvalidArgumentException(\sprintf('limit must be between 1 and %d.', self::MAX_LIMIT));
-        }
+    public function listTasks(
+        ?string $status = null,
+        ?string $project = null,
+        ?array $tag = null,
+        ?bool $include_completed = null,
+        ?int $limit = null,
+    ): array {
+        $resolvedStatus = $status ?? 'pending';
 
-        $status = $filters['status'] ?? 'pending';
-        if (!\in_array($status, ['pending', 'all'], true)) {
+        if (!\in_array($resolvedStatus, ['pending', 'all'], true)) {
             throw new InvalidArgumentException('status must be "pending" or "all".');
         }
 
-        $tags = $filters['tag'] ?? [];
-        if (!\is_array($tags)) {
-            throw new InvalidArgumentException('tag must be a list of strings.');
+        $resolvedTag = $tag ?? [];
+
+        $resolvedLimit = $limit ?? self::DEFAULT_LIMIT;
+        if ($resolvedLimit < 1 || $resolvedLimit > self::MAX_LIMIT) {
+            throw new InvalidArgumentException(\sprintf('limit must be between 1 and %d.', self::MAX_LIMIT));
         }
 
-        $result = $this->service->list([
-            'status' => $status,
-            'limit' => $limit,
-            'project' => $filters['project'] ?? null,
-            'tag' => $tags,
-            'include_completed' => $filters['include_completed'] ?? false,
+        $includeCompleted = $include_completed ?? false;
+
+        return $this->service->list([
+            'status' => $resolvedStatus,
+            'project' => $project,
+            'tag' => $resolvedTag,
+            'limit' => $resolvedLimit,
+            'include_completed' => $includeCompleted,
         ]);
-
-        // If include_completed is set and status was pending, switch to 'all'.
-        if (($filters['include_completed'] ?? false) && 'pending' === $status) {
-            $result = $this->service->list([
-                'status' => 'all',
-                'limit' => $limit,
-                'project' => $filters['project'] ?? null,
-                'tag' => $tags,
-                'include_completed' => true,
-            ]);
-        }
-
-        return $result;
     }
 }
