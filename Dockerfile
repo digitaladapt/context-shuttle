@@ -28,13 +28,15 @@ RUN composer install --no-dev --no-interaction --prefer-dist \
     --optimize-autoloader --no-scripts
 
 # ── Stage: taskwarrior — compile taskwarrior v3 from source ────────────────
-FROM deps AS taskwarrior-build
+FROM rust:1-slim-trixie AS taskwarrior-build
 
 # Build dependencies for taskwarrior v3 (CMake + C++17 compiler).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         cmake \
+        curl \
         g++ \
+        git \
         make \
         ninja-build \
         uuid-dev \
@@ -43,16 +45,16 @@ RUN apt-get update \
 
 # Fetch and compile taskwarrior v3 from the official release tarball.
 # Pinning to a specific release makes the image reproducible.
-ARG TASKWARRIOR_VERSION=3.0.0
-RUN curl -fsSL "https://github.com/GothenburgBitFactory/taskwarrior/releases/download/v${TASKWARRIOR_VERSION}/taskwarrior-${TASKWARRIOR_VERSION}.tar.gz" -o /tmp/taskwarrior.tar.gz \
-    && tar -xzf /tmp/taskwarrior.tar.gz -C /tmp \
-    && mkdir -p /tmp/taskwarrior-${TASKWARRIOR_VERSION}/build \
-    && cmake -S /tmp/taskwarrior-${TASKWARRIOR_VERSION} -B /tmp/taskwarrior-${TASKWARRIOR_VERSION}/build \
+ARG TASKWARRIOR_VERSION=3.5.0
+RUN curl -fsSL "https://github.com/GothenburgBitFactory/taskwarrior/releases/download/v${TASKWARRIOR_VERSION}/task-${TASKWARRIOR_VERSION}.tar.gz" -o /tmp/task.tar.gz \
+    && tar -xzf /tmp/task.tar.gz -C /tmp \
+    && mkdir -p /tmp/task-${TASKWARRIOR_VERSION}/build \
+    && cmake -S /tmp/task-${TASKWARRIOR_VERSION} -B /tmp/task-${TASKWARRIOR_VERSION}/build \
            -DCMAKE_BUILD_TYPE=Release \
            -DCMAKE_INSTALL_PREFIX=/usr/local \
            -DBUILD_TESTING=OFF \
-    && cmake --build /tmp/taskwarrior-${TASKWARRIOR_VERSION}/build --parallel \
-    && cmake --install /tmp/taskwarrior-${TASKWARRIOR_VERSION}/build
+    && cmake --build /tmp/task-${TASKWARRIOR_VERSION}/build --parallel \
+    && cmake --install /tmp/task-${TASKWARRIOR_VERSION}/build
 
 # ── Stage: build — full app + prod autoloader ──────────────────────────────
 FROM deps AS build
