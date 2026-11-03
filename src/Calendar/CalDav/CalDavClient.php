@@ -737,7 +737,7 @@ final readonly class CalDavClient
             return $response->getContent();
         }
 
-        throw new RuntimeException(\sprintf('Could not reach the calendar server at %s: %s', $this->baseUrl(), $lastError?->getMessage() ?? 'unknown transport error'), 0, $lastError);
+        throw new RuntimeException(\sprintf('Could not reach the calendar server at %s: %s', $this->baseUrl(), $lastError->getMessage()), 0, $lastError);
     }
 
     /**
