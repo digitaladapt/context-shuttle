@@ -17,8 +17,24 @@ use RuntimeException;
  * mutations. Sync is enabled when TASKCHAMPION_SYNC_URL is set; when it is
  * absent the tools work against the local `.taskrc` / `~/.task` only.
  *
- * All output is collected from `exec()` and decoded as JSON where possible.
- * A non-zero exit code or empty output becomes a descriptive RuntimeException.
+ * Conventions, learned the hard way:
+ *
+ * - `task` reports success through its *exit code*; its stdout is human
+ *   prose ("Created task 3.") and must never be parsed as data or as a
+ *   status. Machine-readable output comes from `export` with
+ *   `rc.json.array=on`, and from `_projects` / `_get`.
+ * - Arguments are escaped exactly once, here in run(); callers build the
+ *   argv array and never pre-escape. A bare word passed to `add` or
+ *   `modify` replaces the task's *description*, so a mis-escaped
+ *   `project:'x'` token silently corrupts the task.
+ * - Attribute tokens (project:, due:, +tag) go *before* the `--` marker;
+ *   the description goes after it.
+ * - Numeric task ids only address the pending working set. Completed and
+ *   deleted tasks keep their UUID forever, so mutations resolve the id to
+ *   a UUID first and operate on that.
+ * - `rc.confirmation=off` keeps `delete` (and `modify status:deleted`)
+ *   from prompting; stdin is closed, so a prompt would mean an EOF and a
+ *   guaranteed failure.
  */
 final class TaskwarriorService
 {
@@ -75,38 +91,52 @@ final class TaskwarriorService
      */
     public function list(array $filters = []): array
     {
-        $cmd = [self::TASK_BINARY, 'rc.jsonOutput=on', 'export'];
+        // Filter args must precede the command: `task status:pending
+        // export` filters, while `task export status:pending` silently
+        // ignores the filter and returns every status (the root of the
+        // old `+pending` bug, which also sat after the command).
+        // `status:pending` is the real status filter. With no status
+        // filter at all, export returns pending, completed and deleted
+        // alike — which is what include_completed and status:all ask for.
+        $cmd = [self::TASK_BINARY, 'rc.json.array=on'];
 
         $status = $filters['status'] ?? 'pending';
-        if ('all' !== $status) {
-            $cmd[] = "+{$status}";
+        $includeCompleted = $filters['include_completed'] ?? false;
+        if ('all' !== $status && !$includeCompleted) {
+            $cmd[] = 'status:pending';
         }
 
         if (isset($filters['project'])) {
-            $cmd[] = '+PROJECT:'.escapeshellarg($filters['project']);
+            $cmd[] = 'project:'.$filters['project'];
         }
 
         $tags = $filters['tag'] ?? [];
         foreach ($tags as $tag) {
-            $cmd[] = '+'.escapeshellarg($tag);
+            $cmd[] = '+'.$tag;
         }
 
+        $cmd[] = 'export';
+
+        $tasks = $this->runJson($cmd);
+
+        // `limit:N` is deliberately not passed to the CLI: with no other
+        // filter it makes taskwarrior return an empty set, and even
+        // paired with one it cannot distinguish "exactly N" from "more
+        // than N". Export returns the whole matching set — small, for a
+        // personal database — so the page is cut in PHP instead.
         $limit = $filters['limit'] ?? 200;
-        $cmd[] = 'limit:'.$limit;
-
-        $output = $this->run($cmd);
-        $tasks = json_decode($output, true);
-
-        if (!\is_array($tasks)) {
-            throw new RuntimeException(\sprintf('task export returned invalid JSON: %s', $output));
+        if ($limit < 1) {
+            $limit = 1;
         }
 
-        $total = \count($tasks);
-        $hasMore = $total >= $limit;
+        $hasMore = \count($tasks) > $limit;
+        if ($hasMore) {
+            $tasks = \array_slice($tasks, 0, $limit);
+        }
 
         return [
             'tasks' => $tasks,
-            'count' => $total,
+            'count' => \count($tasks),
             'has_more' => $hasMore,
         ];
     }
@@ -123,7 +153,7 @@ final class TaskwarriorService
      *     end?: string,
      * } $attrs
      *
-     * @return array{created: bool, id: int, description: string}
+     * @return array{created: bool, id: int, uuid: string, description: string, task: array<string, mixed>}
      */
     public function create(array $attrs): array
     {
@@ -134,42 +164,48 @@ final class TaskwarriorService
             throw new InvalidArgumentException('description must not be empty.');
         }
 
-        $cmd = [self::TASK_BINARY, 'add', '--', $desc];
+        // Attribute tokens before `--`, description after it. `task add`
+        // prints "Created task N." to stdout — the N is not reliably
+        // parseable, so the created task is read back via +LATEST instead.
+        $cmd = [self::TASK_BINARY, 'rc.confirmation=off', 'add'];
 
         if (isset($attrs['project'])) {
-            $cmd[] = 'project:'.escapeshellarg($attrs['project']);
+            $cmd[] = 'project:'.$attrs['project'];
         }
 
         $tags = $attrs['tags'] ?? [];
         foreach ($tags as $tag) {
-            $cmd[] = '+'.escapeshellarg($tag);
+            $cmd[] = '+'.$tag;
         }
 
         if (isset($attrs['due'])) {
-            $cmd[] = 'due:'.escapeshellarg($attrs['due']);
+            $cmd[] = 'due:'.$attrs['due'];
         }
 
         if (isset($attrs['priority'])) {
-            $cmd[] = 'priority:'.escapeshellarg($attrs['priority']);
+            $cmd[] = 'priority:'.$attrs['priority'];
         }
 
         if (isset($attrs['end'])) {
-            $cmd[] = 'end:'.escapeshellarg($attrs['end']);
+            $cmd[] = 'end:'.$attrs['end'];
         }
 
-        $output = $this->run($cmd);
-        $id = (int) trim($output);
+        $cmd[] = '--';
+        $cmd[] = $desc;
 
-        if (0 === $id) {
-            throw new RuntimeException(\sprintf('task add returned id=0. Output was: %s', $output));
-        }
+        $this->run($cmd);
+
+        $task = $this->runJson([self::TASK_BINARY, 'rc.json.array=on', '+LATEST', 'export'])[0]
+            ?? throw new RuntimeException('task add succeeded but the created task could not be read back.');
 
         $this->syncAfter();
 
         return [
             'created' => true,
-            'id' => $id,
+            'id' => (int) ($task['id'] ?? 0),
+            'uuid' => (string) $task['uuid'],
             'description' => $desc,
+            'task' => $task,
         ];
     }
 
@@ -188,7 +224,7 @@ final class TaskwarriorService
      *     status?: string,
      * } $attrs
      *
-     * @return array{updated: bool, id: int}
+     * @return array{updated: bool, id: int, uuid: string, task: array<string, mixed>}
      */
     public function update(array $attrs): array
     {
@@ -199,65 +235,67 @@ final class TaskwarriorService
 
         $this->syncBefore();
 
-        $cmd = [self::TASK_BINARY, (string) $id, 'modify'];
+        $uuid = $this->resolveIdToUuid($id);
 
-        if (isset($attrs['description'])) {
-            $cmd[] = 'description:'.escapeshellarg($attrs['description']);
-        }
+        $cmd = [self::TASK_BINARY, 'rc.confirmation=off', $uuid, 'modify'];
 
         if (isset($attrs['project'])) {
-            $cmd[] = 'project:'.escapeshellarg($attrs['project']);
+            $cmd[] = 'project:'.$attrs['project'];
         }
 
         $tagsAdd = $attrs['tags_add'] ?? [];
         foreach ($tagsAdd as $tag) {
-            $cmd[] = '+'.escapeshellarg($tag);
+            $cmd[] = '+'.$tag;
         }
 
         $tagsRemove = $attrs['tags_remove'] ?? [];
         foreach ($tagsRemove as $tag) {
-            $cmd[] = '-'.escapeshellarg($tag);
+            $cmd[] = '-'.$tag;
         }
 
         if (isset($attrs['due'])) {
-            $cmd[] = 'due:'.escapeshellarg($attrs['due']);
+            $cmd[] = 'due:'.$attrs['due'];
         }
 
         if (isset($attrs['priority'])) {
-            $cmd[] = 'priority:'.escapeshellarg($attrs['priority']);
+            $cmd[] = 'priority:'.$attrs['priority'];
         }
 
         if (isset($attrs['end'])) {
-            $cmd[] = 'end:'.escapeshellarg($attrs['end']);
+            $cmd[] = 'end:'.$attrs['end'];
         }
 
         if (isset($attrs['status'])) {
             match ($attrs['status']) {
-                'pending' => $cmd[] = 'pending',
-                'completed' => $cmd[] = 'done',
-                'deleted' => $cmd[] = 'delete',
+                'pending' => $cmd[] = 'status:pending',
+                'completed' => $cmd[] = 'status:completed',
+                'deleted' => $cmd[] = 'status:deleted',
                 default => throw new InvalidArgumentException(\sprintf('status must be one of: pending, completed, deleted (got %s)', $attrs['status'])),
             };
         }
 
-        $output = $this->run($cmd);
-
-        if ('' !== trim($output)) {
-            throw new RuntimeException(\sprintf('task modify returned unexpected output: %s', trim($output)));
+        if (isset($attrs['description'])) {
+            $cmd[] = '--';
+            $cmd[] = $attrs['description'];
         }
 
+        $this->run($cmd);
+
+        $task = $this->fetchByUuid($uuid);
         $this->syncAfter();
 
         return [
             'updated' => true,
             'id' => $id,
+            'uuid' => $uuid,
+            'task' => $task,
         ];
     }
 
     /**
      * Complete a task.
      *
-     * @return array{completed: bool, id: int}
+     * @return array{completed: bool, id: int, uuid: string, task: array<string, mixed>}
      */
     public function complete(int $id, ?string $annotation = null): array
     {
@@ -267,31 +305,32 @@ final class TaskwarriorService
 
         $this->syncBefore();
 
-        $cmd = [self::TASK_BINARY, (string) $id, 'done'];
+        $uuid = $this->resolveIdToUuid($id);
+
+        $cmd = [self::TASK_BINARY, 'rc.confirmation=off', $uuid, 'done'];
 
         if (null !== $annotation) {
             $cmd[] = '--';
             $cmd[] = $annotation;
         }
 
-        $output = $this->run($cmd);
+        $this->run($cmd);
 
-        if (0 !== (int) trim($output)) {
-            throw new RuntimeException(\sprintf('task done returned non-zero: %s', trim($output)));
-        }
-
+        $task = $this->fetchByUuid($uuid);
         $this->syncAfter();
 
         return [
             'completed' => true,
             'id' => $id,
+            'uuid' => $uuid,
+            'task' => $task,
         ];
     }
 
     /**
      * Delete a task.
      *
-     * @return array{deleted: bool, id: int}
+     * @return array{deleted: bool, id: int, uuid: string, task: array<string, mixed>}
      */
     public function delete(int $id): array
     {
@@ -301,35 +340,38 @@ final class TaskwarriorService
 
         $this->syncBefore();
 
-        $cmd = [self::TASK_BINARY, (string) $id, 'delete'];
-        $output = $this->run($cmd);
+        $uuid = $this->resolveIdToUuid($id);
 
-        if (0 !== (int) trim($output)) {
-            throw new RuntimeException(\sprintf('task delete returned non-zero: %s', trim($output)));
-        }
+        $this->run([self::TASK_BINARY, 'rc.confirmation=off', $uuid, 'delete']);
 
+        $task = $this->fetchByUuid($uuid);
         $this->syncAfter();
 
         return [
             'deleted' => true,
             'id' => $id,
+            'uuid' => $uuid,
+            'task' => $task,
         ];
     }
 
     /**
-     * Get the highest-urgency ready task.
+     * Get the highest-urgency ready pending task.
+     *
+     * Equivalent to `task next`: pending, not blocked, not waiting, sorted
+     * by descending urgency. Returns null when nothing is ready.
      *
      * @return array<string, mixed>|null
      */
     public function nextAction(): ?array
     {
-        $cmd = [self::TASK_BINARY, 'rc.jsonOutput=on', 'export', 'urgency', 'limit:1'];
-        $output = $this->run($cmd);
-        $tasks = json_decode($output, true);
+        $tasks = $this->runJson([self::TASK_BINARY, 'rc.json.array=on', 'status:pending', '+READY', 'export']);
 
-        if (!\is_array($tasks) || [] === $tasks) {
+        if ([] === $tasks) {
             return null;
         }
+
+        usort($tasks, static fn (array $a, array $b): int => ($b['urgency'] ?? 0) <=> ($a['urgency'] ?? 0));
 
         return $tasks[0];
     }
@@ -337,17 +379,20 @@ final class TaskwarriorService
     /**
      * List all projects.
      *
+     * `_projects` is the machine-readable form: one project per line,
+     * exit 0 even when there are none. The `projects` *report* used here
+     * before exits 1 with "No projects." on an empty working set.
+     *
      * @return list<string>
      */
     public function projectList(): array
     {
-        $cmd = [self::TASK_BINARY, 'projects'];
-        $output = $this->run($cmd);
+        $output = $this->run([self::TASK_BINARY, '_projects']);
 
         $projects = [];
         foreach (explode("\n", $output) as $line) {
             $line = trim($line);
-            if ('' === $line || str_contains($line, 'project')) {
+            if ('' === $line) {
                 continue;
             }
             $projects[] = $line;
@@ -357,7 +402,51 @@ final class TaskwarriorService
     }
 
     /**
-     * Run a single task command and return its stdout.
+     * Fetch a single task by its permanent UUID.
+     *
+     * @return array<string, mixed>
+     */
+    public function get(string $uuid): array
+    {
+        return $this->fetchByUuid($uuid);
+    }
+
+    /**
+     * Resolve a pending numeric id to the task's permanent UUID.
+     *
+     * @return string the task's permanent UUID
+     */
+    private function resolveIdToUuid(int $id): string
+    {
+        $tasks = $this->runJson([self::TASK_BINARY, 'rc.json.array=on', (string) $id, 'export']);
+
+        if ([] === $tasks) {
+            throw new RuntimeException(\sprintf('No task with id %d. Numeric ids only address pending tasks; completed or deleted tasks cannot be selected this way.', $id));
+        }
+
+        return (string) $tasks[0]['uuid'];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function fetchByUuid(string $uuid): array
+    {
+        $tasks = $this->runJson([self::TASK_BINARY, 'rc.json.array=on', $uuid, 'export']);
+
+        if ([] === $tasks) {
+            throw new RuntimeException(\sprintf('Task %s could not be read back after the change.', $uuid));
+        }
+
+        return $tasks[0];
+    }
+
+    /**
+     * Run a task command, require exit 0, and return its trimmed stdout.
+     *
+     * Arguments are escaped here and only here — callers pass raw argv
+     * elements. A non-zero exit becomes a RuntimeException carrying both
+     * streams, since task's diagnostics can land on either.
      *
      * @param list<string> $cmd
      */
@@ -381,11 +470,29 @@ final class TaskwarriorService
         $code = proc_close($process);
 
         if (0 !== $code) {
-            $stderr = trim($stderr);
-            throw new RuntimeException(\sprintf('Command failed (exit %d): %s%s', $code, trim($stdout), $stderr ? "\nSTDERR: $stderr" : ''));
+            throw new RuntimeException(\sprintf('Command failed (exit %d): %s%s', $code, false === $stdout ? '' : trim($stdout), \is_string($stderr) && '' !== trim($stderr) ? "\nSTDERR: ".trim($stderr) : ''));
         }
 
-        return trim($stdout);
+        return false === $stdout ? '' : trim($stdout);
+    }
+
+    /**
+     * Run a command and decode its stdout as a JSON array of tasks.
+     *
+     * @param list<string> $cmd
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function runJson(array $cmd): array
+    {
+        $output = $this->run($cmd);
+        $decoded = '' !== $output ? json_decode($output, true) : [];
+
+        if (!\is_array($decoded)) {
+            throw new RuntimeException(\sprintf('task returned invalid JSON: %s', $output));
+        }
+
+        return $decoded;
     }
 
     /**
@@ -428,7 +535,7 @@ final class TaskwarriorService
 
         $error = null;
         if (0 !== $code) {
-            $error = trim($stderr ?: $stdout);
+            $error = trim((\is_string($stderr) && '' !== trim($stderr)) ? $stderr : (string) $stdout);
         }
 
         return ['code' => $code] + (null !== $error ? ['error' => $error] : []);

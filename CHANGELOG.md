@@ -121,6 +121,43 @@ versioning: [SemVer](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The taskwarrior tools are actually usable now.** Three independent bugs,
+  each invisible to the unit layer, are fixed together because they live in
+  the same service and each alone made the tools unreliable:
+
+  - **List silently ignored its status filter** (and `status:all` /
+    `include_completed` returned nothing but pending tasks, and `project:` /
+    `+tag` filtering was ignored too). `task export status:pending` puts the
+    filter after the command, where taskwarrior ignores it: filter arguments
+    must precede the command (`task status:pending export`). The old
+    `+pending` form sat after the command too, and would have been ignored
+    even had it been the right token.
+
+  - **Create and update wrote attribute tokens into the description.** The
+    command line was escaped twice — once by the service, once by
+    `escapeshellarg` in `run()` — so `project:tools-test` became the literal
+    word `project:tools-test` in the task description and the real
+    attributes never landed. A bare word after `--` replaces the
+    description, which is why the corruption was silent.
+
+  - **Create reported failure after succeeding.** `task add` writes
+    `"Created task 3."` to stdout; the code cast that to int (0) and threw —
+    after the task had already been created. Now the created task is read
+    back via `+LATEST` and returned with its id and uuid, and every mutation
+    returns the post-change task.
+
+  Also fixed on the way: `projectList()` used the `projects` report, which
+  exits 1 with `"No projects."` on an empty working set (`_projects` is the
+  machine-readable form and exits 0 empty); mutations now resolve numeric
+  ids to UUIDs first, because ids only address the pending working set and a
+  just-completed or deleted task could not be read back otherwise; and
+  `list` slices in PHP rather than passing `limit:` to the CLI, which
+  returns an empty set when it is the only filter.
+
+  The rewrite is pinned by a new integration test suite that runs the real
+  `task` binary against a throwaway TASKDATA directory (skips when `task` is
+  not installed, so CI's plain-PHP container is unaffected).
+
 - **REST returned 500 for any tool that sent a notification.** `POST
   /tools/{name}` runs the same pipeline as MCP, so a notifying tool suspended its
   fiber and the transport answered with an SSE stream; the controller then read
