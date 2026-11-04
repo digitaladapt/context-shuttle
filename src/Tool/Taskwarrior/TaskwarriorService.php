@@ -240,10 +240,11 @@ final class TaskwarriorService
     }
 
     /**
-     * Update an existing task.
+     * Update an existing task, addressed by numeric id or uuid.
      *
      * @param array{
-     *     id: int,
+     *     id?: int,
+     *     uuid?: string,
      *     description?: string,
      *     project?: string,
      *     tags_add?: list<string>,
@@ -263,12 +264,10 @@ final class TaskwarriorService
 
         // Bug E (#41): an update that changes nothing reports success
         // while writing nothing — a caller bug that should be loud.
-        $changeKeys = ['description', 'project', 'tags_add', 'tags_remove', 'due', 'priority', 'end', 'status'];
         $hasChange = false;
-        foreach ($changeKeys as $key) {
-            if (\array_key_exists($key, $attrs)
-                && null !== $attrs[$key]
-                && ([] !== $attrs[$key] || \is_string($attrs[$key]))) {
+        foreach (['description', 'project', 'tags_add', 'tags_remove', 'due', 'priority', 'end', 'status'] as $key) {
+            $value = $attrs[$key] ?? null;
+            if (null !== $value && ([] === $value ? false : true)) {
                 $hasChange = true;
                 break;
             }
@@ -336,7 +335,9 @@ final class TaskwarriorService
     }
 
     /**
-     * Complete a task.
+     * Complete a task, addressed by numeric id or uuid.
+     *
+     * @param array{id?: int, uuid?: string} $target
      *
      * @return array{completed: bool, id: int, uuid: string, task: array<string, mixed>}
      */
@@ -369,6 +370,11 @@ final class TaskwarriorService
 
     /**
      * Delete a task.
+     *
+     * @return array{deleted: bool, id: int, uuid: string, task: array<string, mixed>}
+     */
+    /**
+     * @param array{id?: int, uuid?: string} $target
      *
      * @return array{deleted: bool, id: int, uuid: string, task: array<string, mixed>}
      */
