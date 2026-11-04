@@ -22,23 +22,25 @@ TASKDATA_DIR="${TASKDATA:-/data/taskwarrior}"
 mkdir -p "$(dirname "$TASKRC_PATH")" "$TASKDATA_DIR"
 
 SYNC_VARS="TASKCHAMPION_SYNC_URL TASKCHAMPION_SYNC_CLIENT_ID TASKCHAMPION_SYNC_ENCRYPTION_SECRET"
-SYNC_SET=$(for v in $SYNC_VARS; do
-    [ -n "$(eval "printf '%s' \"\${$v:-}\"")" ] && printf '%s ' "$v"
-done)
+SYNC_SET_COUNT=0
+SYNC_MISSING=""
+for v in $SYNC_VARS; do
+    if [ -n "$(eval "printf '%s' \"\${$v:-}\"")" ]; then
+        SYNC_SET_COUNT=$((SYNC_SET_COUNT + 1))
+    else
+        SYNC_MISSING="$SYNC_MISSING $v"
+    fi
+done
 
 # All three, or none. A partially-configured sync produces exactly the
 # silent-failure mode #42 chased for hours: taskwarrior refuses to sync
 # with a confusing error while the tools report `configured: true`.
-case "$SYNC_SET" in
-    '' ) ;;
-    'TASKCHAMPION_SYNC_URL TASKCHAMPION_SYNC_CLIENT_ID TASKCHAMPION_SYNC_ENCRYPTION_SECRET' ) ;;
-    * )
-        echo "ERROR: taskwarrior sync is partially configured (set: $SYNC_SET)." >&2
-        echo "       Set all of TASKCHAMPION_SYNC_URL, TASKCHAMPION_SYNC_CLIENT_ID and" >&2
-        echo "       TASKCHAMPION_SYNC_ENCRYPTION_SECRET, or none of them." >&2
-        exit 1
-        ;;
-esac
+if [ "$SYNC_SET_COUNT" -ne 0 ] && [ "$SYNC_SET_COUNT" -ne 3 ]; then
+    echo "ERROR: taskwarrior sync is partially configured. Set variables:$SYNC_MISSING" >&2
+    echo "       Set all of TASKCHAMPION_SYNC_URL, TASKCHAMPION_SYNC_CLIENT_ID and" >&2
+    echo "       TASKCHAMPION_SYNC_ENCRYPTION_SECRET, or none of them." >&2
+    exit 1
+fi
 
 if [ ! -f "$TASKRC_PATH" ]; then
     {
