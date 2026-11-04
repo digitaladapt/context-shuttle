@@ -33,10 +33,7 @@ function normalizeDate(string $value): string
 
     $ts = strtotime($trimmed);
     if (false === $ts) {
-        throw new InvalidArgumentException(sprintf(
-            'Invalid date "%s": expected an ISO date (YYYY-MM-DD) or a natural-language date taskwarrior accepts (e.g. "tomorrow", "friday", "nov 15").',
-            $value,
-        ));
+        throw new InvalidArgumentException(\sprintf('Invalid date "%s": expected an ISO date (YYYY-MM-DD) or a natural-language date taskwarrior accepts (e.g. "tomorrow", "friday", "nov 15").', $value));
     }
 
     return (new DateTimeImmutable('@'.$ts))->format('Y-m-d');

@@ -70,19 +70,19 @@ final class UpdateTaskTool
         $resolvedTagsRemove = $tags_remove ?? [];
 
         return $this->service->update(
-            \array_filter([
+            array_filter([
                 'id' => $resolvedId,
                 'uuid' => $uuid,
             ], static fn ($v) => null !== $v)
             + [
-            'description' => $description,
-            'project' => $project,
-            'tags_add' => $resolvedTagsAdd,
-            'tags_remove' => $resolvedTagsRemove,
-            'due' => $due,
-            'priority' => $resolvedPriority,
-            'end' => $end,
-            'status' => $resolvedStatus,
-        ]);
+                'description' => $description,
+                'project' => $project,
+                'tags_add' => $resolvedTagsAdd,
+                'tags_remove' => $resolvedTagsRemove,
+                'due' => $due,
+                'priority' => $resolvedPriority,
+                'end' => $end,
+                'status' => $resolvedStatus,
+            ]);
     }
 }

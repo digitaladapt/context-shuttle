@@ -41,7 +41,7 @@ final class DeleteTaskTool
             throw new InvalidArgumentException('A task id (positive integer) or uuid is required.');
         }
 
-        $target = \array_filter(['id' => $resolvedId, 'uuid' => $uuid], static fn ($v) => null !== $v);
+        $target = array_filter(['id' => $resolvedId, 'uuid' => $uuid], static fn ($v) => null !== $v);
 
         return $this->service->delete($target);
     }

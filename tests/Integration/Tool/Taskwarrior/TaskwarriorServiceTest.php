@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Tool\Taskwarrior;
 
 use App\Tool\Taskwarrior\TaskwarriorService;
+use DateTimeImmutable;
 use InvalidArgumentException;
 use Override;
 use PHPUnit\Framework\TestCase;
@@ -353,7 +354,7 @@ final class TaskwarriorServiceTest extends TestCase
         ]);
 
         self::assertSame(
-            (new \DateTimeImmutable('+1 day'))->format('Y-m-d'),
+            (new DateTimeImmutable('+1 day'))->format('Y-m-d'),
             $this->isoDate($result['task']['due']),
         );
     }
@@ -463,6 +464,6 @@ final class TaskwarriorServiceTest extends TestCase
      */
     private function dateSentinel(string $natural): string
     {
-        return (new \DateTimeImmutable('@'.strtotime($natural)))->format('Y-m-d');
+        return (new DateTimeImmutable('@'.strtotime($natural)))->format('Y-m-d');
     }
 }
