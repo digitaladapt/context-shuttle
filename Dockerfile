@@ -73,6 +73,14 @@ RUN APP_ENV=prod APP_SECRET=build-secret bin/console cache:warmup || true \
 # ── Stage: app — the runtime image ─────────────────────────────────────────
 FROM dunglas/frankenphp:1-php8.5-trixie AS app
 
+# Needed in this stage to stamp news.version in the generated taskrc (see
+# below); must match the version the taskwarrior-build stage compiles.
+ARG TASKWARRIOR_VERSION=3.5.0
+# Exposed at runtime so the entrypoint can stamp news.version in a
+# regenerated taskrc (a missing news.version makes `task` print its
+# version news banner to stdout, which the JSON tools would choke on).
+ENV TASKWARRIOR_VERSION=${TASKWARRIOR_VERSION}
+
 # Runtime set: ca-certificates (TLS for outbound tool calls), curl
 # (HEALTHCHECK), and taskwarrior (task CLI for taskwarrior tools).
 RUN apt-get update \
@@ -81,8 +89,14 @@ RUN apt-get update \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy the compiled taskwarrior binary from the build stage.
+# Copy the compiled taskwarrior binary from the build stage, plus its
+# runtime data files. The binary's include search path is compiled in as
+# ${CMAKE_INSTALL_PREFIX}/share/doc/task/rc (cmake.h.in), and the built-in
+# configuration defaults contain `include default.theme` unconditionally —
+# without these 51 files every `task` invocation exits 2 with "Could not
+# find file ... 'default.theme'", no matter what the user taskrc says.
 COPY --from=taskwarrior-build /usr/local/bin/task /usr/local/bin/task
+COPY --from=taskwarrior-build /usr/local/share/doc/task/rc /usr/local/share/doc/task/rc
 
 # PHP configuration and FrankenPHP/Caddy app config
 COPY docker/php.ini /usr/local/etc/php/conf.d/app.ini
@@ -98,12 +112,20 @@ COPY --from=build /app /app
 RUN groupadd --system --gid 1000 app \
  && useradd  --system --uid 1000 --gid app \
              --home-dir /app --shell /usr/sbin/nologin app \
- && mkdir -p /app/var /data \
+ && mkdir -p /app/var /data/taskwarrior \
+ && printf 'data.location=/data/taskwarrior\nconfirmation=off\ncolor=off\nverbose=nothing\nnews.version=%s\n' "$TASKWARRIOR_VERSION" > /data/taskwarrior/taskrc \
  && chown -R app:app /app/var /data
 
 USER app
 
-# Persistent data (sessions, logs) under /data
+# taskwarrior state (taskrc + task database) lives under the persistent
+# volume, owned by `app` — never root, and never in the read-only app tree.
+# A named volume seeded from the image inherits the file and its ownership;
+# the entrypoint recreates both if a bind mount starts empty.
+ENV TASKRC=/data/taskwarrior/taskrc
+ENV TASKDATA=/data/taskwarrior
+
+# Persistent data (sessions, logs, taskwarrior state) under /data
 VOLUME /data
 
 ENV APP_ENV=prod
