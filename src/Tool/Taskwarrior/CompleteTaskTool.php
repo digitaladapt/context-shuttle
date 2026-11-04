@@ -11,7 +11,8 @@ use InvalidArgumentException;
  *
  * An optional annotation string is recorded alongside the completion.
  * The task must exist and be in a pending state; deleting is done via
- * `taskwarrior_update_task` with `status: deleted`.
+ * `taskwarrior_update_task` with `status: deleted`. Prefer uuid
+ * addressing: numeric ids renumber after every completion/deletion.
  */
 final class CompleteTaskTool
 {
@@ -21,19 +22,27 @@ final class CompleteTaskTool
     }
 
     /**
-     * @param int         $id         the task id (required)
-     * @param string|null $annotation optional comment recorded with the completion
+     * @param int|string|null $id         the task id, or null when addressing by uuid
+     * @param string|null     $uuid       the task uuid (preferred over id)
+     * @param string|null     $annotation optional comment recorded with the completion
      *
-     * @return array{completed: bool, id: int}
+     * @return array{completed: bool, id: int, uuid: string}
      */
     public function completeTask(
-        int $id,
+        int|string|null $id = null,
+        ?string $uuid = null,
         ?string $annotation = null,
     ): array {
-        if (0 === $id) {
+        $resolvedId = null === $id ? null : (int) $id;
+        if (null !== $resolvedId && $resolvedId < 1) {
             throw new InvalidArgumentException('id must be a positive integer.');
         }
+        if (null === $resolvedId && (null === $uuid || '' === $uuid)) {
+            throw new InvalidArgumentException('A task id (positive integer) or uuid is required.');
+        }
 
-        return $this->service->complete($id, $annotation);
+        $target = array_filter(['id' => $resolvedId, 'uuid' => $uuid], static fn ($v) => null !== $v);
+
+        return $this->service->complete($target, $annotation);
     }
 }

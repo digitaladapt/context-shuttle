@@ -30,14 +30,13 @@ parameters:
     required: false
   priority:
     type: string
-    description: 'Optional priority: U (urgency), L (low), M (medium), H (high).'
+    description: 'Optional priority: L (low), M (medium), H (high).'
     required: false
     enum:
-      - U
       - L
       - M
       - H
   end:
     type: string
-    description: 'Optional deadline (when the task stops being relevant). Same format as due.'
+    description: 'Optional deadline (when the task stops being relevant; maps to taskwarrior until). Same format as due.'
     required: false

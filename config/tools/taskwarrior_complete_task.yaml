@@ -4,17 +4,27 @@
 # The task must exist and be pending. For permanent deletion use
 # taskwarrior_delete_task instead. A sync runs after completion if
 # TASKCHAMPION_SYNC_URL is configured.
+#
+# Addressing (bug D in #41): uuid is preferred. Numeric ids renumber
+# after every completion or deletion, so an id from a stale list may
+# point at the wrong task. Every task object returned by
+# taskwarrior_list_tasks carries its uuid.
 name: taskwarrior_complete_task
 description: >
-  Mark a taskwarrior task as completed. An optional annotation is
-  recorded. A sync runs after completion if configured.
+  Mark a taskwarrior task as completed, addressed by id or uuid (uuid
+  preferred — ids renumber as tasks complete). An optional annotation
+  is recorded. Runs a sync after completion if configured.
 handler: App\Tool\Taskwarrior\CompleteTaskTool::completeTask
 parameters:
   id:
     type: integer
-    description: 'Task id to complete (required, positive integer).'
-    required: true
+    description: 'Task id to complete. Optional if uuid is given; ids renumber as tasks complete, so prefer uuid.'
+    required: false
     minimum: 1
+  uuid:
+    type: string
+    description: 'Task uuid to complete (preferred over id). Exactly one of id / uuid must be given.'
+    required: false
   annotation:
     type: string
     description: 'Optional comment recorded with the completion.'

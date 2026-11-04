@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Tool\Taskwarrior;
 
 use App\Tool\Taskwarrior\TaskwarriorService;
+use DateTimeImmutable;
 use InvalidArgumentException;
 use Override;
 use PHPUnit\Framework\TestCase;
@@ -84,7 +85,7 @@ final class TaskwarriorServiceTest extends TestCase
         $this->svc()->create(['description' => 'pending two']);
         $second = $this->svc()->list()['tasks'];
         $uuids = array_column($second, 'uuid');
-        $this->svc()->complete((int) $second[1]['id'], 'done with it');
+        $this->svc()->complete(['id' => (int) $second[1]['id']], 'done with it');
 
         $result = $this->svc()->list();
 
@@ -96,7 +97,7 @@ final class TaskwarriorServiceTest extends TestCase
     public function test_include_completed_and_status_all_show_finished_tasks(): void
     {
         $created = $this->svc()->create(['description' => 'do and finish']);
-        $this->svc()->complete($created['id']);
+        $this->svc()->complete(['uuid' => $created['uuid']]);
 
         foreach ([['include_completed' => true], ['status' => 'all']] as $filters) {
             $result = $this->svc()->list($filters);
@@ -210,7 +211,7 @@ final class TaskwarriorServiceTest extends TestCase
     {
         $created = $this->svc()->create(['description' => 'complete me']);
 
-        $result = $this->svc()->complete($created['id'], 'cleanup after test');
+        $result = $this->svc()->complete(['uuid' => $created['uuid']], 'cleanup after test');
 
         $annotations = $result['task']['annotations'] ?? [];
         self::assertSame('completed', $result['task']['status']);
@@ -221,7 +222,7 @@ final class TaskwarriorServiceTest extends TestCase
     {
         $created = $this->svc()->create(['description' => 'delete me']);
 
-        $result = $this->svc()->delete($created['id']);
+        $result = $this->svc()->delete(['uuid' => $created['uuid']]);
 
         self::assertSame('deleted', $result['task']['status']);
         self::assertSame([], $this->svc()->list()['tasks']);
@@ -258,7 +259,7 @@ final class TaskwarriorServiceTest extends TestCase
     {
         $this->svc()->create(['description' => 'plain pending', 'priority' => 'L']);
         $urgent = $this->svc()->create(['description' => 'urgent but done', 'priority' => 'H']);
-        $this->svc()->complete($urgent['id']);
+        $this->svc()->complete(['uuid' => $urgent['uuid']]);
 
         $next = $this->svc()->nextAction();
 
@@ -320,5 +321,149 @@ final class TaskwarriorServiceTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
 
         $this->svc()->update(['id' => 0, 'priority' => 'M']);
+    }
+
+    /**
+     * Bug A (#41): `due:nov 15` passed as one argv element makes task drop
+     * the day and resolve to the 1st of the month. Dates must be normalized
+     * to ISO in PHP before reaching the CLI.
+     */
+    public function test_month_name_dates_resolve_to_the_exact_day(): void
+    {
+        $result = $this->svc()->create([
+            'description' => 'due nov 15',
+            'due' => 'nov 15',
+            'end' => 'nov 20',
+        ]);
+
+        $task = $result['task'];
+        // Expected value is next year's Nov 15 — see dateSentinel().
+        $expected = $this->dateSentinel('nov 15');
+        self::assertSame($expected, $this->isoDate($task['due']));
+        self::assertSame($this->dateSentinel('nov 20'), $this->isoDate($task['until']));
+    }
+
+    /**
+     * Relative forms pass through strtotime and land on the right day too.
+     */
+    public function test_relative_dates_resolve_correctly(): void
+    {
+        $result = $this->svc()->create([
+            'description' => 'due tomorrow',
+            'due' => 'tomorrow',
+        ]);
+
+        self::assertSame(
+            (new DateTimeImmutable('+1 day'))->format('Y-m-d'),
+            $this->isoDate($result['task']['due']),
+        );
+    }
+
+    public function test_invalid_date_is_rejected_loudly(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Invalid date');
+
+        $this->svc()->create(['description' => 'never', 'due' => 'flurgle']);
+    }
+
+    /**
+     * Bug B (#41): the schema's `end` mapped to taskwarrior's `end`, which
+     * is the completion timestamp and cannot be set on a pending task.
+     */
+    public function test_end_maps_to_until_not_end(): void
+    {
+        $result = $this->svc()->create([
+            'description' => 'has a deadline',
+            'end' => '2026-12-31',
+        ]);
+
+        $task = $result['task'];
+        self::assertSame('2026-12-31', $this->isoDate($task['until'] ?? null));
+        self::assertArrayNotHasKey('end', $task);
+    }
+
+    /**
+     * Bug D (#41): uuid addressing must work everywhere id does, and uuid
+     * must win over stale ids (ids renumber after every completion).
+     */
+    public function test_uuid_addressing_works_for_update_complete_delete(): void
+    {
+        $first = $this->svc()->create(['description' => 'first', 'priority' => 'L']);
+        $second = $this->svc()->create(['description' => 'second', 'priority' => 'L']);
+
+        // Complete the first so ids renumber: second was id 2, is now 1.
+        $this->svc()->complete(['uuid' => $first['uuid']]);
+
+        // A stale id=2 would now address nothing; uuid still hits.
+        $updated = $this->svc()->update(['uuid' => $second['uuid'], 'priority' => 'H']);
+        self::assertTrue($updated['updated']);
+        self::assertSame('H', $updated['task']['priority']);
+        self::assertSame($second['uuid'], $updated['uuid']);
+
+        $completed = $this->svc()->complete(['uuid' => $second['uuid']], 'by uuid');
+        self::assertSame('completed', $completed['task']['status']);
+        self::assertSame($second['uuid'], $completed['uuid']);
+
+        $deleted = $this->svc()->delete(['uuid' => $second['uuid']]);
+        self::assertTrue($deleted['deleted']);
+        self::assertSame($second['uuid'], $deleted['uuid']);
+    }
+
+    public function test_both_id_and_uuid_is_rejected(): void
+    {
+        $created = $this->svc()->create(['description' => 'ambiguous']);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('not both');
+
+        $this->svc()->update(['id' => $created['id'], 'uuid' => $created['uuid'], 'priority' => 'M']);
+    }
+
+    /**
+     * Bug E (#41): an update that changes nothing reported success while
+     * writing nothing — a caller bug that should be loud.
+     */
+    public function test_update_with_no_change_fields_is_rejected(): void
+    {
+        $created = $this->svc()->create(['description' => 'untouched']);
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('at least one field');
+
+        $this->svc()->update(['uuid' => $created['uuid']]);
+    }
+
+    public function test_priority_u_is_rejected(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('L, M, H');
+
+        $this->svc()->create(['description' => 'urgent?', 'priority' => 'U']);
+    }
+
+    private function isoDate(?string $value): ?string
+    {
+        if (null === $value) {
+            return null;
+        }
+
+        // TW 2.6 exports compact (20261105T000000Z), TW 3 exports
+        // ISO (2026-11-05T00:00:00Z); accept both.
+        if (1 === preg_match('/^(\d{4})(\d{2})(\d{2})T/', $value, $m)) {
+            return $m[1].'-'.$m[2].'-'.$m[3];
+        }
+
+        return substr($value, 0, 10);
+    }
+
+    /**
+     * strtotime resolves "nov 15" to the next upcoming Nov 15 relative to
+     * today, so the expected due date depends on today's date. Compute it
+     * the same way the service does, but independently.
+     */
+    private function dateSentinel(string $natural): string
+    {
+        return (new DateTimeImmutable('@'.strtotime($natural)))->format('Y-m-d');
     }
 }
