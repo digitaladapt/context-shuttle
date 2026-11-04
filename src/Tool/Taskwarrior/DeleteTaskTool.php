@@ -12,7 +12,9 @@ use InvalidArgumentException;
  * This is destructive: the task is removed from the local database and
  * synced out. There is no undo except restoring from a sync-server backup.
  * Use `taskwarrior_update_task` with `status: deleted` if you want the
- * task to remain in the completed/deleted list for recovery.
+ * task to contain in the completed/deleted list for recovery. Prefer
+ * uuid addressing: numeric ids renumber after every completion/deletion,
+ * so a stale list can point at the wrong task.
  */
 final class DeleteTaskTool
 {
@@ -22,17 +24,25 @@ final class DeleteTaskTool
     }
 
     /**
-     * @param int $id the task id to delete (required)
+     * @param int|string|null $id   the task id, or null when addressing by uuid
+     * @param string|null     $uuid the task uuid (preferred over id)
      *
-     * @return array{deleted: bool, id: int}
+     * @return array{deleted: bool, id: int, uuid: string}
      */
     public function deleteTask(
-        int $id,
+        int|string|null $id = null,
+        ?string $uuid = null,
     ): array {
-        if (0 === $id) {
+        $resolvedId = null === $id ? null : (int) $id;
+        if (null !== $resolvedId && $resolvedId < 1) {
             throw new InvalidArgumentException('id must be a positive integer.');
         }
+        if (null === $resolvedId && (null === $uuid || '' === $uuid)) {
+            throw new InvalidArgumentException('A task id (positive integer) or uuid is required.');
+        }
 
-        return $this->service->delete($id);
+        $target = \array_filter(['id' => $resolvedId, 'uuid' => $uuid], static fn ($v) => null !== $v);
+
+        return $this->service->delete($target);
     }
 }

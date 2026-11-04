@@ -11,6 +11,38 @@ use InvalidArgumentException;
 use RuntimeException;
 
 /**
+ * Parses a user-supplied date string into an ISO Y-M-D date, with the
+ * same month-name and relative forms taskwarrior accepts.
+ *
+ * Why this exists (#41 bug A): a token like `due:nov 15` reaches task
+ * as a single argv element, and its date parser drops the day-of-month
+ * and resolves to the 1st of the named month — silently, exit 0. The
+ * tool schema documents `"nov 15"` as a valid input, so the silent
+ * wrong date was the encouraged path. PHP's parser handles these
+ * forms correctly, so dates are normalized here before they reach the
+ * CLI, and anything unparseable fails loudly instead of being coerced.
+ */
+function normalizeDate(string $value): string
+{
+    $trimmed = trim($value);
+
+    // Already ISO Y-M-D: pass through untouched.
+    if (1 === preg_match('/^\d{4}-\d{2}-\d{2}$/', $trimmed)) {
+        return $trimmed;
+    }
+
+    $ts = strtotime($trimmed);
+    if (false === $ts) {
+        throw new InvalidArgumentException(sprintf(
+            'Invalid date "%s": expected an ISO date (YYYY-MM-DD) or a natural-language date taskwarrior accepts (e.g. "tomorrow", "friday", "nov 15").',
+            $value,
+        ));
+    }
+
+    return (new DateTimeImmutable('@'.$ts))->format('Y-m-d');
+}
+
+/**
  * Wraps the `task` CLI for all taskwarrior tools.
  *
  * Handles optional sync with a taskchampion-sync-server before and after
@@ -38,9 +70,6 @@ use RuntimeException;
  */
 final class TaskwarriorService
 {
-    private const SYNC_PRE = 'sync pre';
-    private const SYNC_POST = 'sync post';
-
     private const TASK_BINARY = '/usr/local/bin/task';
 
     public function __construct(
@@ -66,7 +95,7 @@ final class TaskwarriorService
             ];
         }
 
-        $result = $this->runSync(self::SYNC_PRE);
+        $result = $this->runSync();
 
         return [
             'configured' => true,
@@ -179,15 +208,19 @@ final class TaskwarriorService
         }
 
         if (isset($attrs['due'])) {
-            $cmd[] = 'due:'.$attrs['due'];
+            $cmd[] = 'due:'.normalizeDate($attrs['due']);
         }
 
         if (isset($attrs['priority'])) {
-            $cmd[] = 'priority:'.$attrs['priority'];
+            $cmd[] = 'priority:'.self::validatePriority($attrs['priority']);
         }
 
         if (isset($attrs['end'])) {
-            $cmd[] = 'end:'.$attrs['end'];
+            // `end` in the tool schema means a deadline (when the task
+            // stops being relevant), which is taskwarrior's `until` —
+            // taskwarrior's own `end` is the completion timestamp and
+            // cannot be set on a pending task (#41 bug B).
+            $cmd[] = 'until:'.normalizeDate($attrs['end']);
         }
 
         $cmd[] = '--';
@@ -228,14 +261,26 @@ final class TaskwarriorService
      */
     public function update(array $attrs): array
     {
-        $id = (int) $attrs['id'];
-        if (0 === $id) {
-            throw new InvalidArgumentException('id must be a positive integer.');
+        $uuid = $this->resolveTarget($attrs);
+        $id = (int) ($attrs['id'] ?? 0);
+
+        // Bug E (#41): an update that changes nothing reports success
+        // while writing nothing — a caller bug that should be loud.
+        $changeKeys = ['description', 'project', 'tags_add', 'tags_remove', 'due', 'priority', 'end', 'status'];
+        $hasChange = false;
+        foreach ($changeKeys as $key) {
+            if (\array_key_exists($key, $attrs)
+                && null !== $attrs[$key]
+                && ([] !== $attrs[$key] || \is_string($attrs[$key]))) {
+                $hasChange = true;
+                break;
+            }
+        }
+        if (!$hasChange) {
+            throw new InvalidArgumentException('update requires at least one field to change (description, project, tags_add, tags_remove, due, priority, end, or status).');
         }
 
         $this->syncBefore();
-
-        $uuid = $this->resolveIdToUuid($id);
 
         $cmd = [self::TASK_BINARY, 'rc.confirmation=off', $uuid, 'modify'];
 
@@ -254,15 +299,16 @@ final class TaskwarriorService
         }
 
         if (isset($attrs['due'])) {
-            $cmd[] = 'due:'.$attrs['due'];
+            $cmd[] = 'due:'.normalizeDate($attrs['due']);
         }
 
         if (isset($attrs['priority'])) {
-            $cmd[] = 'priority:'.$attrs['priority'];
+            $cmd[] = 'priority:'.self::validatePriority($attrs['priority']);
         }
 
         if (isset($attrs['end'])) {
-            $cmd[] = 'end:'.$attrs['end'];
+            // See create(): the schema's `end` maps to `until` (#41 bug B).
+            $cmd[] = 'until:'.normalizeDate($attrs['end']);
         }
 
         if (isset($attrs['status'])) {
@@ -286,7 +332,7 @@ final class TaskwarriorService
 
         return [
             'updated' => true,
-            'id' => $id,
+            'id' => (int) ($task['id'] ?? $id),
             'uuid' => $uuid,
             'task' => $task,
         ];
@@ -297,15 +343,12 @@ final class TaskwarriorService
      *
      * @return array{completed: bool, id: int, uuid: string, task: array<string, mixed>}
      */
-    public function complete(int $id, ?string $annotation = null): array
+    public function complete(array $target, ?string $annotation = null): array
     {
-        if (0 === $id) {
-            throw new InvalidArgumentException('id must be a positive integer.');
-        }
+        $uuid = $this->resolveTarget($target);
+        $id = (int) ($target['id'] ?? 0);
 
         $this->syncBefore();
-
-        $uuid = $this->resolveIdToUuid($id);
 
         $cmd = [self::TASK_BINARY, 'rc.confirmation=off', $uuid, 'done'];
 
@@ -321,7 +364,7 @@ final class TaskwarriorService
 
         return [
             'completed' => true,
-            'id' => $id,
+            'id' => (int) ($task['id'] ?? $id),
             'uuid' => $uuid,
             'task' => $task,
         ];
@@ -332,15 +375,12 @@ final class TaskwarriorService
      *
      * @return array{deleted: bool, id: int, uuid: string, task: array<string, mixed>}
      */
-    public function delete(int $id): array
+    public function delete(array $target): array
     {
-        if (0 === $id) {
-            throw new InvalidArgumentException('id must be a positive integer.');
-        }
+        $uuid = $this->resolveTarget($target);
+        $id = (int) ($target['id'] ?? 0);
 
         $this->syncBefore();
-
-        $uuid = $this->resolveIdToUuid($id);
 
         $this->run([self::TASK_BINARY, 'rc.confirmation=off', $uuid, 'delete']);
 
@@ -349,10 +389,56 @@ final class TaskwarriorService
 
         return [
             'deleted' => true,
-            'id' => $id,
+            'id' => (int) ($task['id'] ?? $id),
             'uuid' => $uuid,
             'task' => $task,
         ];
+    }
+
+    /**
+     * Bug C (#41): priority "U" looks like "urgency" in the schema but
+     * taskwarrior rejects it at the CLI with exit 2, surfacing as a
+     * generic command failure. Validate it here for a clear error.
+     */
+    private static function validatePriority(string $priority): string
+    {
+        $upper = strtoupper($priority);
+        if (!\in_array($upper, ['L', 'M', 'H'], true)) {
+            throw new InvalidArgumentException('priority must be one of: L, M, H.');
+        }
+
+        return $upper;
+    }
+
+    /**
+     * Resolve a task target — numeric id or UUID — to the task's UUID.
+     *
+     * Bug D (#41): numeric ids only address the pending working set and
+     * renumber after every completion/deletion, so an agent acting on a
+     * stale list could delete the wrong task. Every task object returned
+     * by list_tasks carries its uuid; callers that have one should pass
+     * it. Exactly one of id/uuid must be provided.
+     *
+     * @param array{id?: int|string, uuid?: string} $target
+     */
+    private function resolveTarget(array $target): string
+    {
+        $uuid = $target['uuid'] ?? null;
+        $id = isset($target['id']) ? (int) $target['id'] : 0;
+
+        if (null !== $uuid && '' !== $uuid) {
+            if ($id > 0) {
+                throw new InvalidArgumentException('Pass either id or uuid, not both.');
+            }
+
+            return $uuid;
+        }
+
+        if (0 === $id) {
+            throw new InvalidArgumentException('A task id (positive integer) or uuid is required.');
+        }
+
+        return $this->resolveIdToUuid($id);
     }
 
     /**
@@ -500,20 +586,21 @@ final class TaskwarriorService
      *
      * @return array{code: int, error?: string}
      */
-    private function runSync(string $operation): array
+    private function runSync(): array
     {
         if ('' === $this->syncUrl || '' === $this->syncClientId || '' === $this->syncSecret) {
             return ['code' => 0];
         }
 
+        // Taskwarrior 3 reads sync config from the taskrc (sync.server.url,
+        // sync.server.client_id, sync.encryption_secret — written there by
+        // the container entrypoint from TASKCHAMPION_* env vars). The old
+        // TW2-style `task sync pre on <url> ...` invocation is invalid in
+        // TW3 and was the root cause of "No sync.* settings are configured"
+        // while the wrapper believed sync was configured (#42).
         $cmd = [
             self::TASK_BINARY,
             'sync',
-            $operation,
-            'on',
-            $this->syncUrl,
-            $this->syncClientId,
-            $this->syncSecret,
         ];
 
         $descriptors = [
@@ -547,7 +634,7 @@ final class TaskwarriorService
             return;
         }
 
-        $result = $this->runSync(self::SYNC_PRE);
+        $result = $this->runSync();
         if (0 !== $result['code']) {
             // Non-fatal: continue with local changes even if sync fails.
             // The operator can retry manually.
@@ -560,6 +647,6 @@ final class TaskwarriorService
             return;
         }
 
-        $this->runSync(self::SYNC_POST);
+        $this->runSync();
     }
 }
