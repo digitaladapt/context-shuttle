@@ -15,6 +15,16 @@ tool_invoke:
     requirements:
         name: '[a-z][a-z0-9_]*'
 
+messages_list:
+    path: /messages
+    controller: App\Rest\MessagesRestController::list
+    methods: [GET]
+
+messages_post:
+    path: /messages
+    controller: App\Rest\MessagesRestController::post
+    methods: [POST]
+
 openapi:
     path: /openapi.json
     controller: App\Rest\OpenApiController

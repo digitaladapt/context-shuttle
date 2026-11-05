@@ -16,6 +16,8 @@ parameters:
     env(ICS_URL): ''
     env(ICS_NAME): 'ics'
     env(MEMORY_DRAFT_URL): ''
+    env(MESSAGES_DB): ''
+    env(MESSAGES_ACTOR): 'resident'
     env(NTFY_URL): ''
     env(NTFY_TOPIC): ''
     env(NTFY_TOKEN): ''
@@ -68,6 +70,17 @@ parameters:
     # is NOT probed at boot — a memory store being down must never stop
     # context-shuttle from starting.
     memory_draft_url: '%env(string:default::MEMORY_DRAFT_URL)%'
+
+    # Messages family configuration. The store is this gateway's own SQLite
+    # file — always registered, no gate — with MESSAGES_DB naming an
+    # alternate path (empty = %kernel.project_dir%/var/messages.sqlite) and
+    # MESSAGES_ACTOR naming this deployment's resident, the sender of record
+    # for a send_message that does not claim one. The path is NOT probed at
+    # boot: a directory that cannot be written must never stop
+    # context-shuttle from serving its other tools — it surfaces on first
+    # use with a message naming the variable.
+    messages_db: '%env(string:default::MESSAGES_DB)%'
+    messages_actor: '%env(string:default::MESSAGES_ACTOR)%'
 
     # Calendar tool configuration. CALDAV_URL is NOT probed at boot: a
     # calendar server being down must never stop context-shuttle from
@@ -304,6 +317,27 @@ services:
 
     App\Tool\MemoryDraft\MemoryDraftTool:
         public: true
+
+    # ── Messages ──────────────────────────────────────────────────
+    # The store is a service because three surfaces need the same answer:
+    # both tools and both REST endpoints. One instance, one lazy connection,
+    # one schema ensure — two copies would be two files' worth of drift.
+    # The path resolves in PHP (empty MESSAGES_DB = the default location),
+    # because env() cannot fall back to a container parameter.
+    App\Messages\MessageStore:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+            $path: '%messages_db%'
+
+    App\Tool\Messages\MessagesTool:
+        public: true
+        arguments:
+            $actor: '%messages_actor%'
+
+    App\Rest\MessagesRestController:
+        tags: ['controller.service_arguments']
+        arguments:
+            $actor: '%messages_actor%'
 
     # ── Calendar ────────────────────────────────────────────────────────
     App\Calendar\Domain\TimeZoneRule:

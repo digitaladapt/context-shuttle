@@ -1,0 +1,34 @@
+# Messages — the read-side tool. The family's read verb, so a conversation
+# survives a context window: new mail is *delivered* to a resident by its
+# harness as user turns, but once an epoch ends the exchange is out of
+# context, and this is how it is re-read — including the caller's own past
+# messages. See send_message.yaml for the family's registration posture.
+name: get_messages
+description: >
+  Read messages from a conversation, oldest first, starting after a
+  message id. Use it to re-read what was said — including your own past
+  messages — for example after a compaction, when earlier exchanges are no
+  longer in your context. New messages reach you on their own when they
+  arrive; you do not need to poll for them. The result tells you the
+  newest id it contains and whether more exists, so you can page forward
+  by passing that id as since.
+handler: App\Tool\Messages\MessagesTool::getMessages
+parameters:
+  conversation:
+    type: string
+    description: 'Conversation to read. Lowercase letters, digits, dot, underscore, hyphen. Omit for the default conversation.'
+    required: false
+    default: default
+  since:
+    type: integer
+    description: 'Only return messages with an id greater than this. Start from 0 to read from the beginning.'
+    required: false
+    default: 0
+    minimum: 0
+  limit:
+    type: integer
+    description: 'Maximum messages to return (1-200). Messages are oldest-first; page with the newest id from the result.'
+    required: false
+    default: 50
+    minimum: 1
+    maximum: 200

@@ -1,0 +1,36 @@
+# Messages — the write-side tool. Speak into a conversation; the message is
+# stored and delivered to the other participants of that conversation.
+#
+# Always registered: the store is this gateway's own (a SQLite file at
+# MESSAGES_DB, default var/messages.sqlite), so there is no URL whose
+# absence should hide the family — unlike memory-draft, naming no store is
+# not a decision this deployment can make by silence.
+#
+# The `sender` parameter is a *claim*, not a credential: one key
+# authenticates the whole gateway, so the store cannot check who is
+# speaking. v1 accepts and documents that hole; the fix is per-participant
+# keys, at which point the parameter is removed and the sender is derived
+# server-side. Omitting it means "this deployment's resident" (MESSAGES_ACTOR).
+name: send_message
+description: >
+  Send a message in a conversation. Messages are stored and delivered to
+  the other participants of the conversation; replies may arrive later in
+  your context. This is for speaking *to* someone — use it when you want to
+  be heard. It is not for notes to yourself: your memory tools are for
+  that. The result confirms storage and carries the message id, which you
+  can later resume reading from.
+handler: App\Tool\Messages\MessagesTool::sendMessage
+parameters:
+  body:
+    type: string
+    description: 'The message to send, in your own words. Up to 4000 characters; longer bodies are stored truncated (the result says so).'
+    required: true
+  conversation:
+    type: string
+    description: 'Conversation to post to. Lowercase letters, digits, dot, underscore, hyphen. Omit for the default conversation.'
+    required: false
+    default: default
+  sender:
+    type: string
+    description: 'Who is speaking, if not you. Omit entirely unless you are posting on behalf of someone; the deployment records its configured actor by default.'
+    required: false
