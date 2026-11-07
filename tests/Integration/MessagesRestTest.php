@@ -224,7 +224,7 @@ final class MessagesRestTest extends WebTestCase
 
         self::assertSame($restId + 1, $toolId, 'one store, one id space');
 
-        $client->request("GET", "/messages?since={$restId}");
+        $client->request('GET', "/messages?since={$restId}");
         $payload = json_decode((string) $client->getResponse()->getContent(), true);
 
         self::assertSame('from tool', $payload['messages'][0]['body']);

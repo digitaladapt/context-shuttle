@@ -103,7 +103,7 @@ final class MessagesTool
         return $this->store->after($name, $since, $limit);
     }
 
-    /**
+    /*
      * The sender of record: the caller's claim, or the configured actor.
      *
      * Omitting `sender` means "I am speaking as this deployment's resident",

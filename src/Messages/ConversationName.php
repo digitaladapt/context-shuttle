@@ -50,10 +50,7 @@ final readonly class ConversationName
         }
 
         if (1 !== preg_match(self::PATTERN, $trimmed)) {
-            throw new ConversationNameException(
-                "A conversation name is lowercase letters, digits, dot, underscore or hyphen, "
-                ."starting with a letter or digit, up to 64 characters — got '{$trimmed}'.",
-            );
+            throw new ConversationNameException('A conversation name is lowercase letters, digits, dot, underscore or hyphen, '."starting with a letter or digit, up to 64 characters — got '{$trimmed}'.");
         }
 
         return new self($trimmed);

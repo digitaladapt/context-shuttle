@@ -45,7 +45,7 @@ final class MessageBody
 
     /**
      * @return array{body: string, truncated: bool} the storable body and
-     *                                               whether anything was cut
+     *                                              whether anything was cut
      *
      * @throws InvalidArgumentException when the body is empty after scrubbing
      */
@@ -64,9 +64,7 @@ final class MessageBody
         $trimmed = trim($cleaned);
 
         if ('' === $trimmed) {
-            throw new InvalidArgumentException(
-                'A message body is required — there is nothing to store.',
-            );
+            throw new InvalidArgumentException('A message body is required — there is nothing to store.');
         }
 
         $truncated = \strlen($trimmed) > self::MAX_BYTES;

@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Messages;
 
+use DateTimeImmutable;
+use DateTimeInterface;
+use DateTimeZone;
 use PDO;
 use PDOException;
 use RuntimeException;
@@ -65,7 +68,7 @@ final class MessageStore
      */
     public function append(ConversationName $conversation, string $sender, string $body): array
     {
-        $createdAt = (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format(\DateTimeInterface::ATOM);
+        $createdAt = (new DateTimeImmutable('now', new DateTimeZone('UTC')))->format(DateTimeInterface::ATOM);
 
         $statement = $this->pdo()->prepare(
             'INSERT INTO message (conversation, sender, body, created_at) VALUES (:conversation, :sender, :body, :created_at)',
@@ -197,10 +200,7 @@ final class MessageStore
                 'CREATE INDEX IF NOT EXISTS idx_message_conversation_id ON message (conversation, id)',
             );
         } catch (PDOException $exception) {
-            throw new RuntimeException(
-                "The message store at '{$path}' could not be opened or initialized: ".$exception->getMessage(),
-                previous: $exception,
-            );
+            throw new RuntimeException("The message store at '{$path}' could not be opened or initialized: ".$exception->getMessage(), previous: $exception);
         }
 
         return $this->pdo = $pdo;
